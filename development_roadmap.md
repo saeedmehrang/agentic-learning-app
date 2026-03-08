@@ -24,7 +24,7 @@
 > **Goal:** All cloud services provisioned, IAM configured, local dev environment ready. Nothing can be built until this is done.
 
 ### 0.1 GCP Project Bootstrap
-- [ ] Create GCP project (`learning-system-mvp` or equivalent)
+- [ ] Create GCP project (`agentic-learning-app` or equivalent)
 - [ ] Enable billing and set a monthly budget alert (e.g. $25/month)
 - [ ] Enable required APIs: Cloud Run, Cloud SQL Admin, Vertex AI, Secret Manager, Artifact Registry
 - [ ] Create a dedicated service account for Cloud Run with least-privilege IAM roles
