@@ -17,6 +17,7 @@ app/**/*.freezed.dart
 **/service-account*.json
 .env
 .env.*
+!.env.example
 
 # Secrets & keys
 infra/secrets/
