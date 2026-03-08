@@ -1,0 +1,61 @@
+# Flutter / Dart
+app/.dart_tool/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/.packages
+app/build/
+app/pubspec.lock
+app/**/*.g.dart
+app/**/*.freezed.dart
+
+# Firebase / GCP credentials
+**/google-services.json
+**/GoogleService-Info.plist
+**/firebase_options.dart
+**/*-credentials.json
+**/*-key.json
+**/service-account*.json
+.env
+.env.*
+
+# Secrets & keys
+infra/secrets/
+**/*.pem
+**/*.p8
+**/*.p12
+
+# Python (backend / content pipeline)
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+.pytest_cache/
+
+# Generated content / embeddings
+content/generated/
+content/embeddings/
+content/*.jsonl
+
+# Character assets — keep PNGs, ignore working files
+assets/characters/**/*.psd
+assets/characters/**/*.ai
+assets/characters/**/*.sketch
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Terraform (if added later)
+infra/**/.terraform/
+infra/**/*.tfstate
+infra/**/*.tfstate.backup
+infra/**/*.tfvars
