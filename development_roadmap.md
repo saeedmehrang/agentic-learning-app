@@ -19,6 +19,19 @@
 
 ---
 
+## Development Environment
+
+devcontainer isolated: A devcontainer gives you reproducible Python (ADK), Dart/Flutter, and Node (content pipeline scripts) environments in one place, with GCP CLI and Firebase CLI pre-installed.
+
+Local system wide installation: Flutter for mobile needs Android SDK and iOS tools, which devcontainers can't fully provide — iOS tooling requires a native macOS host, and Android emulation inside a container is painful.
+
+Practical split:
+
+- Use the devcontainer for everything backend — ADK agents, content pipeline, infra scripts, Cloud SQL migrations. This is where isolation matters most.
+- Run Flutter natively on your host machine, connected to the containerised backend via localhost port-forwarding.
+
+---
+
 ## Phase 0 — Project Setup & GCP Infrastructure
 
 > **Goal:** All cloud services provisioned, IAM configured, local dev environment ready. Nothing can be built until this is done.
