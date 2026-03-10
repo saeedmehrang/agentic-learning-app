@@ -1,0 +1,52 @@
+{
+  "name": "${localWorkspaceFolderBasename}",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "remoteUser": "node",
+  "mounts": [
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
+    "source=${localEnv:HOME}/.gitconfig,target=/home/node/.gitconfig,readonly,type=bind",
+    "source=${localEnv:HOME}/.config/gcloud,target=/home/node/.config/gcloud,type=bind"
+  ],
+  "containerEnv": {
+    "GOOGLE_CLOUD_PROJECT": "${localEnv:GOOGLE_CLOUD_PROJECT}",
+    "GCP_PROJECT_ID": "${localEnv:GCP_PROJECT_ID}",
+    "GCP_REGION": "${localEnv:GCP_REGION}",
+    "APP_ENV": "development"
+  },
+  "postCreateCommand": "[ -f pyproject.toml ] && uv sync && uv run pre-commit install || echo 'No pyproject.toml yet — skipping uv sync'",
+  "forwardPorts": [3000, 8000, 5432, 9099],
+  "portsAttributes": {
+    "3000": { "label": "Dev server" },
+    "8000": { "label": "ADK backend" },
+    "5432": { "label": "Cloud SQL proxy (Postgres)" },
+    "9099": { "label": "Firebase emulator (Auth)" }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "astral-sh.ty",
+        "ms-azuretools.vscode-docker",
+        "HashiCorp.terraform",
+        "googlecloudtools.cloudcode",
+        "eamodio.gitlens",
+        "GitHub.vscode-pull-request-github"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+        "python.terminal.activateEnvironment": true,
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff"
+        },
+        "ruff.organizeImports": true,
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  }
+}
