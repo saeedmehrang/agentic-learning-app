@@ -101,6 +101,9 @@ RUN apt-get update -y && \
 # Install jscpd and ts-prune
 RUN npm install -g jscpd ts-prune
 
+# Install Claude Code
+RUN npm install -g @anthropic-ai/claude-code
+
 # https://github.com/cli/cli/blob/trunk/docs/install_linux.md#debian
 RUN apt-get update -y && \
     mkdir -p -m 755 /etc/apt/keyrings && \
