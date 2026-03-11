@@ -82,3 +82,70 @@ Secret values are never stored in `.env`, code, or shell history. The backend fe
 gcloud auth application-default login
 ```
 Run once. All local SDK and Secret Manager calls will use these credentials.
+
+## Firebase Setup (Roadmap step 0.2)
+
+**Prerequisites:** Firebase CLI installed (`npm install -g firebase-tools`), `firebase login` completed, GCP Bootstrap (step 0.1) done.
+
+### 1. Link Firebase to the GCP project
+```bash
+firebase projects:addfirebase agentic-learning-app \
+  --display-name "Agentic Learning App"
+```
+Fallback: Firebase console → "Add Firebase to a Google Cloud project" → select `agentic-learning-app`.
+
+### 2. Enable Firebase APIs and Anonymous auth
+```bash
+./infra/scripts/enable_apis.sh   # now also enables Firestore, Identity Toolkit, Firebase APIs
+```
+Then enable the Anonymous sign-in provider:
+```bash
+ACCESS_TOKEN=$(gcloud auth print-access-token)
+curl -s -X PATCH \
+  "https://identitytoolkit.googleapis.com/admin/v2/projects/agentic-learning-app/config?updateMask=signIn.anonymous.enabled" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"signIn": {"anonymous": {"enabled": true}}}'
+```
+
+### 3. Enable Google Sign-In (manual — no CLI path)
+Firebase console → Authentication → Sign-in method → Google → Enable → save.
+
+### 4. Provision Firestore and update IAM
+```bash
+./infra/scripts/tf.sh plan
+./infra/scripts/tf.sh apply
+```
+Adds `google_firestore_database` (Native mode, `us-central1`) and grants `roles/datastore.user` to the Cloud Run SA.
+
+### 5. Enable Crashlytics (manual)
+Firebase console → Crashlytics → Enable Crashlytics → accept terms.
+
+### 6. Register apps and download config files
+```bash
+firebase apps:create android com.agenticlearning.app \
+  --project=agentic-learning-app \
+  --display-name="Agentic Learning App (Android)"
+
+firebase apps:create ios com.agenticlearning.app \
+  --project=agentic-learning-app \
+  --display-name="Agentic Learning App (iOS)"
+
+mkdir -p infra/firebase-config
+
+ANDROID_APP_ID=$(firebase apps:list android --project=agentic-learning-app --json \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['result'][0]['appId'])")
+firebase apps:sdkconfig android "$ANDROID_APP_ID" \
+  --project=agentic-learning-app \
+  --out=infra/firebase-config/google-services.json
+
+IOS_APP_ID=$(firebase apps:list ios --project=agentic-learning-app --json \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['result'][0]['appId'])")
+firebase apps:sdkconfig ios "$IOS_APP_ID" \
+  --project=agentic-learning-app \
+  --out=infra/firebase-config/GoogleService-Info.plist
+```
+
+Config files are stored in `infra/firebase-config/` (gitignored). They are placed into the Flutter project in Phase 5 via `flutterfire configure`.
+
+> **Phase 5 follow-up:** Run `flutterfire configure` from `app/` after `flutter create` to place config files and generate `firebase_options.dart`.

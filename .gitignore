@@ -9,6 +9,7 @@ app/**/*.g.dart
 app/**/*.freezed.dart
 
 # Firebase / GCP credentials
+infra/firebase-config/
 **/google-services.json
 **/GoogleService-Info.plist
 **/firebase_options.dart

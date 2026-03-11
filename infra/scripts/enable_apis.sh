@@ -13,6 +13,9 @@ gcloud services enable \
     aiplatform.googleapis.com \
     secretmanager.googleapis.com \
     artifactregistry.googleapis.com \
+    firestore.googleapis.com \
+    identitytoolkit.googleapis.com \
+    firebase.googleapis.com \
     --project="$GCP_PROJECT_ID"
 
 echo "All APIs enabled successfully."

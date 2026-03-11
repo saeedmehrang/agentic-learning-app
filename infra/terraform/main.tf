@@ -51,6 +51,23 @@ resource "google_secret_manager_secret" "db_connection_name" {
   }
 }
 
+# ---------------------------------------------------------------------------
+# Firestore — Native mode, co-located with Cloud Run and Cloud SQL
+# ---------------------------------------------------------------------------
+
+resource "google_firestore_database" "default" {
+  project             = var.project_id
+  name                = "(default)"
+  location_id         = var.region
+  type = "FIRESTORE_NATIVE"
+}
+
+resource "google_project_iam_member" "firestore_user" {
+  project = var.project_id
+  role    = "roles/datastore.user"
+  member  = "serviceAccount:${google_service_account.cloud_run_sa.email}"
+}
+
 # Grant the SA read access to each secret
 resource "google_secret_manager_secret_iam_member" "sa_db_password" {
   secret_id = google_secret_manager_secret.db_password.id
