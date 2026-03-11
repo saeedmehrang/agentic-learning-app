@@ -42,6 +42,7 @@ Practical split:
 - [ ] Enable required APIs: Cloud Run, Cloud SQL Admin, Vertex AI, Secret Manager, Artifact Registry
 - [ ] Create a dedicated service account for Cloud Run with least-privilege IAM roles
 - [ ] Store all secrets (DB credentials, API keys) in Secret Manager — no plaintext credentials in code
+- [ ] Set `DB_PASSWORD` in `.env` and run `./infra/scripts/push_secrets.sh` to push it to Secret Manager (run immediately after `terraform apply`)
 
 ### 0.2 Firebase Project Setup
 - [ ] Create Firebase project linked to the GCP project above
@@ -56,6 +57,7 @@ Practical split:
 - [ ] Create application database and dedicated DB user with scoped permissions
 - [ ] Configure private IP (VPC) access between Cloud SQL and Cloud Run
 - [ ] Test connection from local machine via Cloud SQL Auth Proxy
+- [ ] Set `DB_CONNECTION_NAME` in `.env` (`project:region:instance`) and re-run `./infra/scripts/push_secrets.sh` to push it to Secret Manager
 
 ### 0.4 Local Development Environment
 - [ ] Install and configure Google Cloud SDK (`gcloud` CLI)

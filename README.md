@@ -40,9 +40,9 @@ See [learning_system_spec.md](learning_system_spec.md) for the complete technica
 **Prerequisites:** `gcloud` CLI authenticated (`gcloud auth login`), Terraform ≥ 1.5 installed, billing enabled on the GCP project.
 
 ### 0. Configure environment
-Copy `.env` and fill in your values (only `GCP_PROJECT_ID` and `GCP_REGION` need changing for a new project):
+Copy `.env.example` and fill in your values (only `GCP_PROJECT_ID` and `GCP_REGION` need changing for a new project):
 ```bash
-cp .env .env.local  # optional — .env already has sane defaults
+cp .env.example .env  # .env already has sane defaults
 ```
 All scripts and the Terraform wrapper read `.env` automatically. No manual `export` needed.
 
@@ -60,14 +60,22 @@ All scripts and the Terraform wrapper read `.env` automatically. No manual `expo
 
 This creates the Cloud Run service account with least-privilege IAM roles (`cloudsql.client`, `aiplatform.user`) and the Secret Manager secret containers (`DB_PASSWORD`, `DB_CONNECTION_NAME`).
 
-### 3. Store secret values
+### 3. Push secret values to Secret Manager
+
 ```bash
-python3 -c "import secrets; print(secrets.token_urlsafe(32), end='')" | \
-  gcloud secrets versions add DB_PASSWORD --data-file=-
-echo -n "agentic-learning-app:us-central1:learning-app-db" | \
-  gcloud secrets versions add DB_CONNECTION_NAME --data-file=-
+./infra/scripts/push_secrets.sh
 ```
-Secret values are never stored in code or `.env`. The backend config loader fetches them from Secret Manager at startup via Application Default Credentials.
+
+The script is designed so secret values **never touch disk**:
+
+- **`DB_PASSWORD`** — generated from `/dev/urandom` inside the script and piped directly to Secret Manager via stdin. You never see or store it. The app reads it from Secret Manager at runtime.
+- **`DB_CONNECTION_NAME`** — prompted interactively with hidden input (`read -rs`). Lives only in a shell variable for the duration of the script, then discarded.
+
+The script skips any secret that already has an enabled version (idempotent) and skips `DB_CONNECTION_NAME` if you leave the prompt blank.
+
+> **Phase 0.3 follow-up:** Re-run `push_secrets.sh` after Cloud SQL is provisioned — enter the connection name (`project:region:instance`) at the prompt.
+
+Secret values are never stored in `.env`, code, or shell history. The backend fetches them from Secret Manager at startup via Application Default Credentials.
 
 ### 4. Configure local dev credentials
 ```bash
