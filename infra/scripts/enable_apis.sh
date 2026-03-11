@@ -1,9 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
-PROJECT_ID="agentic-learning-app"
+# Load environment variables from repo root .env
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+set -a; source "$REPO_ROOT/.env"; set +a
 
-echo "Enabling required GCP APIs for project: $PROJECT_ID"
+echo "Enabling required GCP APIs for project: $GCP_PROJECT_ID"
 
 gcloud services enable \
     run.googleapis.com \
@@ -11,6 +13,6 @@ gcloud services enable \
     aiplatform.googleapis.com \
     secretmanager.googleapis.com \
     artifactregistry.googleapis.com \
-    --project="$PROJECT_ID"
+    --project="$GCP_PROJECT_ID"
 
 echo "All APIs enabled successfully."

@@ -39,6 +39,13 @@ See [learning_system_spec.md](learning_system_spec.md) for the complete technica
 
 **Prerequisites:** `gcloud` CLI authenticated (`gcloud auth login`), Terraform ≥ 1.5 installed, billing enabled on the GCP project.
 
+### 0. Configure environment
+Copy `.env` and fill in your values (only `GCP_PROJECT_ID` and `GCP_REGION` need changing for a new project):
+```bash
+cp .env .env.local  # optional — .env already has sane defaults
+```
+All scripts and the Terraform wrapper read `.env` automatically. No manual `export` needed.
+
 ### 1. Enable required APIs
 ```bash
 ./infra/scripts/enable_apis.sh
@@ -46,10 +53,11 @@ See [learning_system_spec.md](learning_system_spec.md) for the complete technica
 
 ### 2. Provision service account and Secret Manager containers
 ```bash
-cd infra/terraform
-terraform init
-terraform apply
+./infra/scripts/tf.sh init
+./infra/scripts/tf.sh apply
 ```
+`tf.sh` is a thin wrapper that injects `.env` values as Terraform variables (`GCP_PROJECT_ID` → `project_id`, `GCP_REGION` → `region`) before delegating to `terraform`.
+
 This creates the Cloud Run service account with least-privilege IAM roles (`cloudsql.client`, `aiplatform.user`) and the Secret Manager secret containers (`DB_PASSWORD`, `DB_CONNECTION_NAME`).
 
 ### 3. Store secret values
