@@ -53,6 +53,9 @@ All scripts and the Terraform wrapper read `.env` automatically. No manual `expo
 
 ### 2. Provision service account and Secret Manager containers
 ```bash
+# first run this:
+ gcloud auth application-default login
+# then run these
 ./infra/scripts/tf.sh init
 ./infra/scripts/tf.sh apply
 ```
@@ -85,14 +88,21 @@ Run once. All local SDK and Secret Manager calls will use these credentials.
 
 ## Firebase Setup (Roadmap step 0.2)
 
-**Prerequisites:** Firebase CLI installed (`npm install -g firebase-tools`), `firebase login` completed, GCP Bootstrap (step 0.1) done.
+**Prerequisites:** `firebase login` completed, GCP Bootstrap (step 0.1) done.
 
 ### 1. Link Firebase to the GCP project
+
+> **Note:** The `firebase projects:addfirebase` CLI command consistently returns 403 PERMISSION_DENIED even with Owner + Firebase Admin roles, due to a Firebase API quota project mismatch. Use the console instead.
+
+**Use the Firebase console (required):**
+1. Go to [console.firebase.google.com](https://console.firebase.google.com)
+2. Click **"Add project"** → select existing GCP project `agentic-learning-app`
+3. Follow the wizard — enable Google Analytics, select **Europe** as the data location
+
+After the console wizard completes, set the ADC quota project so CLI tools work correctly:
 ```bash
-firebase projects:addfirebase agentic-learning-app \
-  --display-name "Agentic Learning App"
+gcloud auth application-default set-quota-project agentic-learning-app
 ```
-Fallback: Firebase console → "Add Firebase to a Google Cloud project" → select `agentic-learning-app`.
 
 ### 2. Enable Firebase APIs and Anonymous auth
 ```bash

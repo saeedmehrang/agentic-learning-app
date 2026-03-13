@@ -37,17 +37,17 @@ Practical split:
 > **Goal:** All cloud services provisioned, IAM configured, local dev environment ready. Nothing can be built until this is done.
 
 ### 0.1 GCP Project Bootstrap
-- [ ] Create GCP project (`agentic-learning-app` or equivalent)
-- [ ] Enable billing and set a monthly budget alert (e.g. $25/month)
-- [ ] Enable required APIs: Cloud Run, Cloud SQL Admin, Vertex AI, Secret Manager, Artifact Registry
-- [ ] Create a dedicated service account for Cloud Run with least-privilege IAM roles
-- [ ] Store all secrets (DB credentials, API keys) in Secret Manager — no plaintext credentials in code
-- [ ] Set `DB_PASSWORD` in `.env` and run `./infra/scripts/push_secrets.sh` to push it to Secret Manager (run immediately after `terraform apply`)
+- [x] Create GCP project (`agentic-learning-app` or equivalent)
+- [x] Enable billing and set a monthly budget alert (e.g. $25/month)
+- [x] Enable required APIs: Cloud Run, Cloud SQL Admin, Vertex AI, Secret Manager, Artifact Registry
+- [x] Create a dedicated service account for Cloud Run with least-privilege IAM roles
+- [x] Store all secrets (DB credentials, API keys) in Secret Manager — no plaintext credentials in code
+- [x] Set `DB_PASSWORD` in `.env` and run `./infra/scripts/push_secrets.sh` to push it to Secret Manager (run immediately after `terraform apply`)
 
 ### 0.2 Firebase Project Setup
-- [ ] Create Firebase project linked to the GCP project above
+- [x] Create Firebase project linked to the GCP project above — done via Firebase console (CLI `projects:addfirebase` returns 403 regardless of IAM; use console instead)
 - [ ] Enable Firebase Authentication (Anonymous provider + Google Sign-In)
-- [ ] Enable Firestore in Native mode (region: choose closest to target users)
+- [ ] Enable Firestore in Native mode (region: europe-west — closest to target users)
 - [ ] Enable Firebase Analytics and Crashlytics
 - [ ] Download `google-services.json` (Android) and `GoogleService-Info.plist` (iOS)
 

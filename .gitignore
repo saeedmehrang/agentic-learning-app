@@ -8,6 +8,10 @@ app/pubspec.lock
 app/**/*.g.dart
 app/**/*.freezed.dart
 
+# Firebase debug logs
+firebase-debug.log
+.firebase/
+
 # Firebase / GCP credentials
 infra/firebase-config/
 **/google-services.json
