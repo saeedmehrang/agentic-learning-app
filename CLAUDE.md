@@ -8,7 +8,7 @@ Self-paced agentic learning platform. MVP: Linux basics course (9 modules, 29 le
 - **Backend**: Google ADK agents on Cloud Run (Python 3.11+)
 - **Databases**: Cloud SQL (PostgreSQL + pgvector), Firestore
 - **Auth & Analytics**: Firebase Auth (anonymous → Google Sign-In upgrade), Firebase Analytics, Crashlytics
-- **AI Models**: Gemini 2.0 Flash (ContextAgent, LessonAgent), Gemini 2.5 Flash-Lite (HelpAgent, SummaryAgent)
+- **AI Models**: Gemini 2.5 Flash (ContextAgent, LessonAgent), Gemini 2.5 Flash-Lite (HelpAgent, SummaryAgent)
 - **Spaced Repetition**: FSRS algorithm
 - **Infra**: GCP-native, scale-to-zero Cloud Run
 
@@ -48,8 +48,8 @@ Use `.claude/agents/` sub-agents for any focused work in their domain:
 ContextAgent → LessonAgent → HelpAgent → SummaryAgent
 ```
 
-- **ContextAgent**: Retrieves user memory (Firestore) + calls `search_knowledge_base` tool (pgvector RAG). Model: Gemini 2.0 Flash.
-- **LessonAgent**: Delivers lessons AND handles quizzing (single context window); calls difficulty tiers (Beginner / Intermediate / Advanced). Model: Gemini 2.0 Flash.
+- **ContextAgent**: Retrieves user memory (Firestore) + calls `search_knowledge_base` tool (pgvector RAG). Model: Gemini 2.5 Flash.
+- **LessonAgent**: Delivers lessons AND handles quizzing (single context window); calls difficulty tiers (Beginner / Intermediate / Advanced). Model: Gemini 2.5 Flash.
 - **HelpAgent**: Answers follow-up questions; 3-turn limit, then hands off to Gemini app via `gemini_handoff_prompt`. Model: Gemini 2.5 Flash-Lite.
 - **SummaryAgent**: Evaluates session, calls `run_fsrs` tool to update spaced repetition schedule. Model: Gemini 2.5 Flash-Lite.
 
