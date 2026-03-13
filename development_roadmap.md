@@ -46,10 +46,12 @@ Practical split:
 
 ### 0.2 Firebase Project Setup
 - [x] Create Firebase project linked to the GCP project above — done via Firebase console (CLI `projects:addfirebase` returns 403 regardless of IAM; use console instead)
+- [x] Terraform for Firebase written (`infra/terraform/firebase.tf`): enables Firebase/Crashlytics/Analytics APIs, imports Firebase project, registers Android and iOS apps, and writes `google-services.json` / `GoogleService-Info.plist` to the Flutter app directories — **not yet applied/tested**
+- [ ] Run `terraform import google_firebase_project.default projects/<project_id>` then `terraform apply` to provision Firebase apps and download config files
 - [ ] Enable Firebase Authentication (Anonymous provider + Google Sign-In)
 - [ ] Enable Firestore in Native mode (region: europe-west — closest to target users)
 - [ ] Enable Firebase Analytics and Crashlytics
-- [ ] Download `google-services.json` (Android) and `GoogleService-Info.plist` (iOS)
+- [ ] Verify `google-services.json` and `GoogleService-Info.plist` are written to `app/android/app/` and `app/ios/Runner/` respectively after apply
 
 ### 0.3 Cloud SQL Setup
 - [ ] Provision Cloud SQL for PostgreSQL instance (`db-f1-micro`, same region as Cloud Run)
