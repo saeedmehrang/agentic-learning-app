@@ -10,7 +10,7 @@
   "remoteUser": "node",
   "mounts": [
     "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
-    "source=${localEnv:HOME}/.gitconfig,target=/home/node/.gitconfig,readonly,type=bind",
+    "source=${localEnv:HOME}/.gitconfig,target=/home/node/.gitconfig,type=bind",
     "source=${localEnv:HOME}/.config/gcloud,target=/home/node/.config/gcloud,type=bind"
   ],
   "containerEnv": {
@@ -37,7 +37,6 @@
         "ms-azuretools.vscode-docker",
         "HashiCorp.terraform",
         "googlecloudtools.cloudcode",
-        "eamodio.gitlens",
         "GitHub.vscode-pull-request-github"
       ],
       "settings": {
@@ -48,7 +47,9 @@
           "editor.defaultFormatter": "charliermarsh.ruff"
         },
         "ruff.organizeImports": true,
-        "terminal.integrated.defaultProfile.linux": "bash"
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "cloudcode.enableTelemetry": false,
+        "cloudcode.portForwarding.enableAutoForwarding": false
       }
     }
   }
