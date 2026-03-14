@@ -7,11 +7,11 @@
       "PYTHON_VERSION": "3.13"
     }
   },
-  "remoteUser": "node",
+  "remoteUser": "vscode",
   "mounts": [
     "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
-    "source=${localEnv:HOME}/.gitconfig,target=/home/node/.gitconfig,type=bind",
-    "source=${localEnv:HOME}/.config/gcloud,target=/home/node/.config/gcloud,type=bind"
+    "source=${localEnv:HOME}/.gitconfig,target=/tmp/.host-gitconfig,readonly,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.config/gcloud,target=/home/vscode/.config/gcloud,type=bind"
   ],
   "containerEnv": {
     "GOOGLE_CLOUD_PROJECT": "${localEnv:GOOGLE_CLOUD_PROJECT}",
@@ -19,38 +19,29 @@
     "GCP_REGION": "${localEnv:GCP_REGION}",
     "APP_ENV": "development"
   },
-  "postCreateCommand": "[ -f backend/pyproject.toml ] && (cd backend && uv sync) || echo 'No backend/pyproject.toml yet — skipping uv sync'",
+  "postCreateCommand": "git config --global user.name \"$(git config -f /tmp/.host-gitconfig user.name)\" && git config --global user.email \"$(git config -f /tmp/.host-gitconfig user.email)\"; [ -f backend/pyproject.toml ] && (cd backend && uv sync) || echo 'No backend/pyproject.toml yet — skipping uv sync'",
   "forwardPorts": [3000, 8000, 5432, 9099],
   "portsAttributes": {
-    "3000": { "label": "Dev server" },
-    "8000": { "label": "ADK backend" },
-    "5432": { "label": "Cloud SQL proxy (Postgres)" },
-    "9099": { "label": "Firebase emulator (Auth)" }
+    "3000": { "label": "Dev server", "onAutoForward": "silent" },
+    "8000": { "label": "ADK backend", "onAutoForward": "silent" },
+    "5432": { "label": "Cloud SQL proxy (Postgres)", "onAutoForward": "silent" },
+    "9099": { "label": "Firebase emulator (Auth)", "onAutoForward": "silent" }
   },
+  "otherPortsAttributes": { "onAutoForward": "ignore" },
   "customizations": {
     "vscode": {
       "extensions": [
-        "ms-python.python",
-        "ms-python.vscode-pylance",
-        "charliermarsh.ruff",
-        "astral-sh.ty",
-        "ms-azuretools.vscode-docker",
-        "HashiCorp.terraform",
-        "googlecloudtools.cloudcode",
         "GitHub.vscode-pull-request-github"
       ],
       "settings": {
         "editor.formatOnSave": true,
-        "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/bin/python",
-        "python.terminal.activateEnvironment": true,
-        "[python]": {
-          "editor.defaultFormatter": "charliermarsh.ruff"
-        },
-        "ruff.organizeImports": true,
         "terminal.integrated.defaultProfile.linux": "bash",
-        "cloudcode.enableTelemetry": false,
-        "cloudcode.portForwarding.enableAutoForwarding": false
-      }
+        "remote.autoForwardPorts": false,
+        "remote.autoForwardPortsSource": "output"
+      },
+      "unwantedRecommendations": [
+        "dbaeumer.vscode-eslint"
+      ]
     }
   }
 }

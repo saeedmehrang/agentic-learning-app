@@ -5,7 +5,7 @@ ARG NODE_VERSION=24
 # Keep in sync with /.python-version
 ARG PYTHON_VERSION=3.13
 
-FROM mcr.microsoft.com/devcontainers/typescript-node:${NODE_VERSION}
+FROM mcr.microsoft.com/devcontainers/base:debian
 
 ARG NODE_VERSION
 ARG PYTHON_VERSION
@@ -14,6 +14,11 @@ ARG CLOUD_SQL_PROXY_VERSION=2.21.1
 
 ENV NODE_VERSION=${NODE_VERSION}
 ENV PYTHON_VERSION=${PYTHON_VERSION}
+
+# ── Layer 0: Node.js ────────────────────────────────────────────────────────
+RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    rm -rf /var/lib/apt/lists/*
 
 # ── Layer 1: base system deps + all apt keyrings in one pass ─────────────────
 # Install prerequisites, add all third-party apt repos, then install everything
@@ -70,7 +75,7 @@ RUN apt-get update -y && \
     rm -rf /var/lib/apt/lists/*
 
 # ── Layer 2: Docker group ─────────────────────────────────────────────────────
-RUN groupadd -f docker && usermod -aG docker node
+RUN groupadd -f docker && usermod -aG docker vscode
 
 # ── Layer 3: uv ───────────────────────────────────────────────────────────────
 RUN curl -LsSf https://astral.sh/uv/install.sh \
@@ -122,8 +127,8 @@ RUN npm install -g jscpd ts-prune && npm cache clean --force
 
 RUN npm install -g @anthropic-ai/claude-code && npm cache clean --force
 
-# ── Layer 11: git defaults (node user) ───────────────────────────────────────
-USER node
+# ── Layer 11: git defaults (vscode user) ──────────────────────────────────────
+USER vscode
 RUN git config --global push.autoSetupRemote true && \
     git config --global push.default simple && \
     git config --global pull.rebase true && \
