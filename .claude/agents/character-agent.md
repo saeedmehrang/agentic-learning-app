@@ -5,7 +5,7 @@ description: >
   creating style anchor prompts, producing emotion variants via Gemini image generation,
   validating consistency, or optimising PNGs for Flutter bundling.
   Do NOT invoke for Flutter widget code, backend logic, or any other task.
-tools: Read, Write, Edit, Bash, Glob, Grep
+tools: Read, Write, Edit, Glob, Grep
 ---
 
 # character-agent

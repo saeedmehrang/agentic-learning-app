@@ -1,0 +1,19 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [[ \"$CLAUDE_FILE_PATHS\" == *.py ]]; then uvx ruff check \"$CLAUDE_FILE_PATHS\" || true; fi"
+          },
+          {
+            "type": "command",
+            "command": "if [[ \"$CLAUDE_FILE_PATHS\" == *.dart ]]; then cd \"$(git rev-parse --show-toplevel)/app\" && flutter analyze || true; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

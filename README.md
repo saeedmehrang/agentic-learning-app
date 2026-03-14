@@ -11,6 +11,26 @@ Self-paced mobile learning platform for Linux basics. Bite-sized 7–10 minute s
 | Knowledge store | Cloud SQL for PostgreSQL 17 + pgvector |
 | Learner memory | Firestore |
 
+## Claude Code Setup
+
+Four Claude Code features are active in this project:
+
+**Lint-on-save hooks** — [`.claude/settings.json`](.claude/settings.json)
+Automatically runs `ruff check` after any Python file edit and `flutter analyze` after any Dart file edit. Warnings are printed inline but do not block the session.
+
+**`/session` skill** — [`.claude/skills/session/SKILL.md`](.claude/skills/session/SKILL.md)
+Run `/session` at the start of any work session. Reads `development_roadmap.md`, identifies the current phase and next 3 tasks, and outputs a focused brief with the relevant constraints and sub-agent to use.
+
+**Sub-agent tool restrictions** — [`.claude/agents/`](.claude/agents/)
+`character-agent` has no Bash access (image prompt and file work only). All other sub-agents (`backend-agent`, `flutter-agent`, `content-agent`, `infra-agent`) retain full tool access including Bash.
+
+**GitHub MCP server** — [`.mcp.json`](.mcp.json)
+Gives Claude access to GitHub APIs (issues, PRs, code search). Requires a GitHub token in your environment before launching Claude Code:
+```bash
+export GITHUB_TOKEN=$(gh auth token)   # if gh CLI is authenticated
+# or set GITHUB_TOKEN to a PAT with repo scope from github.com/settings/tokens
+```
+
 ## Python Version
 
 Pinned in [`.python-version`](.python-version). When upgrading, update all four places:
