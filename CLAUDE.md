@@ -126,4 +126,5 @@ alembic revision --autogenerate -m "description" # generate migration
 - Branch naming: `feature/`, `fix/`, `chore/` prefixes
 - Never commit directly to `main`
 - Commit messages: imperative mood, max 72 chars (e.g. `Add quiz retry logic to LessonAgent`)
+- Never mention Claude/AI in the commit message or sign off with Claude/AI
 - Before opening a PR: `flutter analyze` + `pytest` must pass
