@@ -5,154 +5,123 @@ ARG NODE_VERSION=24
 # Keep in sync with /.python-version
 ARG PYTHON_VERSION=3.13
 
-# Use the Node version in the base image tag
 FROM mcr.microsoft.com/devcontainers/typescript-node:${NODE_VERSION}
 
-# Re-declare args if you want to use them in later RUNs
 ARG NODE_VERSION
 ARG PYTHON_VERSION
+ARG TERRAFORM_VERSION=1.14.6
+ARG CLOUD_SQL_PROXY_VERSION=2.21.1
 
-# Optional: expose them as env vars inside the container
 ENV NODE_VERSION=${NODE_VERSION}
 ENV PYTHON_VERSION=${PYTHON_VERSION}
 
-# Install minimal system deps (wget needed by later steps; avoid installing distro Python)
+# ── Layer 1: base system deps + all apt keyrings in one pass ─────────────────
+# Install prerequisites, add all third-party apt repos, then install everything
+# in a single apt-get install to minimise update/clean cycles.
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
-    wget && \
+        ca-certificates curl gnupg wget lsb-release && \
+    \
+    # Docker CLI keyring
+    install -m 0755 -d /etc/apt/keyrings && \
+    curl -fsSL https://download.docker.com/linux/debian/gpg \
+        -o /etc/apt/keyrings/docker.asc && \
+    chmod a+r /etc/apt/keyrings/docker.asc && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+        https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+        | tee /etc/apt/sources.list.d/docker.list > /dev/null && \
+    \
+    # GitHub CLI keyring
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null && \
+    chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] \
+        https://cli.github.com/packages stable main" \
+        | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
+    \
+    # Terraform keyring
+    curl -fsSL https://apt.releases.hashicorp.com/gpg \
+        | gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] \
+        https://apt.releases.hashicorp.com $(lsb_release -cs) main" \
+        | tee /etc/apt/sources.list.d/hashicorp.list > /dev/null && \
+    \
+    # Google Cloud SDK keyring
+    curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+        | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] \
+        https://packages.cloud.google.com/apt cloud-sdk main" \
+        | tee /etc/apt/sources.list.d/google-cloud-sdk.list > /dev/null && \
+    \
+    # Install all apt packages in one pass
+    apt-get update -y && \
+    apt-get install -y --no-install-recommends \
+        docker-ce-cli docker-buildx-plugin docker-compose-plugin \
+        gh \
+        terraform=${TERRAFORM_VERSION}-1 \
+        google-cloud-cli \
+        ripgrep fd-find jq yq bat tree sd && \
+    \
+    # Debian name quirks: fd-find => fd, bat => bat
+    ln -sf "$(command -v fdfind)" /usr/local/bin/fd && \
+    ln -sf "$(command -v batcat)" /usr/local/bin/bat && \
+    \
     rm -rf /var/lib/apt/lists/*
 
-# Install uv (Astral) - manages both Python versions and packages
-RUN curl -LsSf https://astral.sh/uv/install.sh | env CARGO_HOME=/opt/uv UV_INSTALL_DIR=/usr/local/bin sh
+# ── Layer 2: Docker group ─────────────────────────────────────────────────────
+RUN groupadd -f docker && usermod -aG docker node
 
-# Install the pinned Python version via uv and make it the default python/python3
+# ── Layer 3: uv ───────────────────────────────────────────────────────────────
+RUN curl -LsSf https://astral.sh/uv/install.sh \
+        | env CARGO_HOME=/opt/uv UV_INSTALL_DIR=/usr/local/bin sh && \
+    rm -rf /opt/uv
+
+# ── Layer 4: Python (pinned via uv) ───────────────────────────────────────────
 RUN uv python install ${PYTHON_VERSION} && \
     ln -sf "$(uv python find ${PYTHON_VERSION})" /usr/local/bin/python && \
     ln -sf "$(uv python find ${PYTHON_VERSION})" /usr/local/bin/python3
 
-# Install Python tools system-wide using uv (uses the pinned Python version)
-# Using --system so tools are available globally without activating a venv
+# ── Layer 5: Python tools (isolated via uv tool) ─────────────────────────────
 RUN uv tool install ruff && \
     uv tool install ty && \
-    uv pip install --system --python ${PYTHON_VERSION} \
-    deadcode \
-    pytest \
+    uv tool install deadcode && \
+    uv cache clean
+
+# ── Layer 6: Python runtime libs (system-wide for global availability) ────────
+RUN uv pip install --system --break-system-packages --python ${PYTHON_VERSION} \
     google-adk \
     psycopg2-binary \
-    google-cloud-firestore
+    google-cloud-firestore \
+    mcp && \
+    uv cache clean
 
-# Install Docker CLI
-# https://docs.docker.com/engine/install/debian/
-RUN apt-get update -y && \
-    apt-get install -y --no-install-recommends \
-    ca-certificates \
-    curl \
-    gnupg && \
-    install -m 0755 -d /etc/apt/keyrings && \
-    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc && \
-    chmod a+r /etc/apt/keyrings/docker.asc && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
-    $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-    tee /etc/apt/sources.list.d/docker.list > /dev/null && \
-    apt-get update -y && \
-    apt-get install -y --no-install-recommends \
-    docker-ce-cli \
-    docker-buildx-plugin \
-    docker-compose-plugin && \
-    rm -rf /var/lib/apt/lists/*
-
-# Add the node user to the docker group so they can run docker without sudo
-RUN groupadd -f docker && usermod -aG docker node
-
-# Install MCP server framework system-wide (separate from project venv to avoid httpx conflict)
-RUN pip install --no-cache-dir --break-system-packages mcp>=1.0.0
-
-# Install Terraform
-# https://developer.hashicorp.com/terraform/install#linux
-ARG TERRAFORM_VERSION=1.14.6
-RUN apt-get update -y && \
-    apt-get install -y --no-install-recommends gnupg && \
-    curl -fsSL https://apt.releases.hashicorp.com/gpg | \
-    gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg && \
-    echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] \
-    https://apt.releases.hashicorp.com $(lsb_release -cs) main" | \
-    tee /etc/apt/sources.list.d/hashicorp.list > /dev/null && \
-    apt-get update -y && \
-    apt-get install -y terraform=${TERRAFORM_VERSION}-1 && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install Cloud SQL Auth Proxy
+# ── Layer 7: Cloud SQL Auth Proxy ─────────────────────────────────────────────
 # https://cloud.google.com/sql/docs/postgres/sql-proxy
-ARG CLOUD_SQL_PROXY_VERSION=2.21.1
 RUN curl -fsSL \
     "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v${CLOUD_SQL_PROXY_VERSION}/cloud-sql-proxy.linux.amd64" \
     -o /usr/local/bin/cloud-sql-proxy && \
     chmod +x /usr/local/bin/cloud-sql-proxy
 
-# Install Firebase CLI
-RUN npm install -g firebase-tools
+# ── Layer 8: act (local GitHub Actions runner) ────────────────────────────────
+RUN curl -fsSL https://github.com/nektos/act/releases/latest/download/act_Linux_x86_64.tar.gz \
+        -o /tmp/act.tgz && \
+    tar -xzf /tmp/act.tgz -C /usr/local/bin act && \
+    rm /tmp/act.tgz
 
-# Install Google Cloud SDK
-RUN apt-get update -y && \
-    echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
-    | tee /etc/apt/sources.list.d/google-cloud-sdk.list && \
-    curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg \
-    | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && \
-    apt-get update -y && \
-    apt-get install -y google-cloud-cli && \
-    rm -rf /var/lib/apt/lists/*
+# ── Layer 9: scc (source line counter) ───────────────────────────────────────
+RUN wget -qO /tmp/scc.tar.gz \
+        https://github.com/boyter/scc/releases/latest/download/scc_Linux_x86_64.tar.gz && \
+    tar xf /tmp/scc.tar.gz -C /usr/local/bin scc && \
+    rm /tmp/scc.tar.gz
 
-# Install jscpd and ts-prune
-RUN npm install -g jscpd ts-prune
+# ── Layer 10: npm global tools ────────────────────────────────────────────────
+RUN npm install -g firebase-tools && npm cache clean --force
 
-# Install Claude Code
-RUN npm install -g @anthropic-ai/claude-code
+RUN npm install -g jscpd ts-prune && npm cache clean --force
 
-# https://github.com/cli/cli/blob/trunk/docs/install_linux.md#debian
-RUN apt-get update -y && \
-    mkdir -p -m 755 /etc/apt/keyrings && \
-    out=$(mktemp) && wget -nv -O$out https://cli.github.com/packages/githubcli-archive-keyring.gpg && \
-    cat $out | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null && \
-    chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
-    mkdir -p -m 755 /etc/apt/sources.list.d && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
-    apt-get update -y && \
-    apt-get install -y gh && \
-    rm -rf /var/lib/apt/lists/*
+RUN npm install -g @anthropic-ai/claude-code && npm cache clean --force
 
-# https://lindevs.com/install-scc-source-code-line-counter-on-ubuntu
-RUN wget -qO scc.tar.gz https://github.com/boyter/scc/releases/latest/download/scc_Linux_x86_64.tar.gz && \
-    tar xf scc.tar.gz -C /usr/local/bin scc && \
-    rm -rf scc.tar.gz
-
-# --- LLM-friendly CLI tools: rg, fd, jq/yq, bat, tree, sd ---
-RUN set -eux; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends \
-    ripgrep \
-    fd-find \
-    jq \
-    yq \
-    bat \
-    tree \
-    sd; \
-    \
-    # Debian/Ubuntu name quirks: fd-find => fdfind, bat => batcat
-    ln -sf "$(command -v fdfind)" /usr/local/bin/fd; \
-    ln -sf "$(command -v batcat)" /usr/local/bin/bat; \
-    \
-    # sanity check
-    rg --version; fd --version; jq --version; yq --version; bat --version; tree --version; sd --version; \
-    \
-    apt-get clean; \
-    rm -rf /var/lib/apt/lists/*
-
-# Install act
-RUN curl -sSL https://github.com/nektos/act/releases/latest/download/act_Linux_x86_64.tar.gz -o act.tgz && \
-    tar -xzf act.tgz -C /usr/local/bin act && \
-    rm -rf act.tgz
-
-# Configure Git defaults for the node user (user.name/email forwarded from host by devcontainer)
+# ── Layer 11: git defaults (node user) ───────────────────────────────────────
 USER node
 RUN git config --global push.autoSetupRemote true && \
     git config --global push.default simple && \
