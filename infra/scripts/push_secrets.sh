@@ -1,14 +1,14 @@
 #!/bin/bash
 # push_secrets.sh — push secret values to Secret Manager without touching disk.
 #
-# DB_PASSWORD  : generated here using /dev/urandom. Never written to a file or
-#                shell history. Piped directly to gcloud via stdin.
-# DB_CONNECTION_NAME : prompted interactively with hidden input (read -rs).
-#                      Exists only in a local shell variable for the duration
-#                      of this script, then discarded.
+# DB_PASSWORD  : managed by Terraform (random_password resource in cloudsql.tf).
+#                This script skips it if a version already exists (Terraform will
+#                have written one). Only relevant if you need to manually rotate.
+# DB_CONNECTION_NAME : pushed here after Cloud SQL is provisioned via Terraform.
+#                      The value is read from terraform output cloud_sql_connection_name,
+#                      or can be entered manually.
 #
-# Run once after `tf.sh apply` for DB_PASSWORD.
-# Re-run after Cloud SQL provisioning (Phase 0.3) for DB_CONNECTION_NAME.
+# Run after `tf.sh apply` for Phase 0.3 to push DB_CONNECTION_NAME.
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
@@ -66,10 +66,17 @@ if secret_has_version "DB_CONNECTION_NAME"; then
   echo "Already has an enabled version — skipping."
   echo "To update, disable all existing versions first."
 else
-  echo "Format: project-id:region:instance-name"
-  echo "Leave blank to skip (re-run this script after Cloud SQL is provisioned)."
-  # -r: raw (no backslash escapes), -s: silent (no echo)
-  read -rp "DB_CONNECTION_NAME: " conn_name
+  # Try to read from terraform output first
+  TF_DIR="$(git rev-parse --show-toplevel)/infra/terraform"
+  conn_name=$(cd "$TF_DIR" && terraform output -raw cloud_sql_connection_name 2>/dev/null || true)
+
+  if [ -z "$conn_name" ]; then
+    echo "Format: project-id:region:instance-name"
+    echo "Leave blank to skip (re-run this script after Cloud SQL is provisioned)."
+    read -rp "DB_CONNECTION_NAME: " conn_name
+  else
+    echo "Auto-detected from terraform output: $conn_name"
+  fi
 
   if [ -z "$conn_name" ]; then
     echo "SKIP: DB_CONNECTION_NAME — re-run after Phase 0.3 Cloud SQL provisioning"

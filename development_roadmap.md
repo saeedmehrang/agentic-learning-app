@@ -54,12 +54,12 @@ Practical split:
 - [x] Verify `google-services.json` and `GoogleService-Info.plist` are written to `app/android/app/` and `app/ios/Runner/` respectively after apply
 
 ### 0.3 Cloud SQL Setup
-- [ ] Provision Cloud SQL for PostgreSQL instance (`db-f1-micro`, same region as Cloud Run)
-- [ ] Enable the `pgvector` extension on the database
-- [ ] Create application database and dedicated DB user with scoped permissions
-- [ ] Configure private IP (VPC) access between Cloud SQL and Cloud Run
+- [ ] Provision Cloud SQL for PostgreSQL instance (`db-f1-micro` Enterprise edition, POSTGRES_17, same region as Cloud Run) — Terraform written (`infra/terraform/cloudsql.tf`), run `terraform apply` to provision
+- [ ] Enable the `pgvector` extension on the database — `cloudsql.enable_pgvector` flag set in Terraform; run `./infra/scripts/enable_pgvector.sh` after apply to create the extension inside the DB
+- [ ] Create application database and dedicated DB user with scoped permissions — Terraform written (`google_sql_database`, `google_sql_user`)
+- [ ] Configure private IP (VPC) access between Cloud SQL and Cloud Run — Terraform written (`google_compute_global_address`, `google_service_networking_connection`)
 - [ ] Test connection from local machine via Cloud SQL Auth Proxy
-- [ ] Set `DB_CONNECTION_NAME` in `.env` (`project:region:instance`) and re-run `./infra/scripts/push_secrets.sh` to push it to Secret Manager
+- [ ] Set `DB_CONNECTION_NAME` in `.env` (`project:region:instance`) and re-run `./infra/scripts/push_secrets.sh` to push it to Secret Manager — script auto-reads from `terraform output` after apply
 
 ### 0.4 Local Development Environment
 - [ ] Install and configure Google Cloud SDK (`gcloud` CLI)

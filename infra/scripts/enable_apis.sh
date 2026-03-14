@@ -19,6 +19,8 @@ gcloud services enable \
     firebasecrashlytics.googleapis.com \
     cloudbuild.googleapis.com \
     iap.googleapis.com \
+    compute.googleapis.com \
+    servicenetworking.googleapis.com \
     --project="$GCP_PROJECT_ID"
 
 echo "All APIs enabled successfully."
