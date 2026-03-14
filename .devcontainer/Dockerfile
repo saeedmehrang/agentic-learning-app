@@ -5,18 +5,21 @@ ARG NODE_VERSION=24
 # Keep in sync with /.python-version
 ARG PYTHON_VERSION=3.13
 
-FROM mcr.microsoft.com/devcontainers/base:debian
+# [M1] Pinned base image tag for reproducible builds
+FROM mcr.microsoft.com/devcontainers/base:2.1.7-bookworm
 
 ARG NODE_VERSION
 ARG PYTHON_VERSION
 ARG TERRAFORM_VERSION=1.14.6
 ARG CLOUD_SQL_PROXY_VERSION=2.21.1
+ARG UV_VERSION=0.10.10
+ARG ACT_VERSION=0.2.84
+ARG SCC_VERSION=3.7.0
 
-ENV NODE_VERSION=${NODE_VERSION}
-ENV PYTHON_VERSION=${PYTHON_VERSION}
-
-# ── Layer 0: Node.js ────────────────────────────────────────────────────────
-RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
+# [H1] Node.js — download setup script first, then execute (no curl-pipe-bash)
+RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_VERSION}.x" -o /tmp/nodesource.sh && \
+    bash /tmp/nodesource.sh && \
+    rm /tmp/nodesource.sh && \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
 
@@ -77,57 +80,60 @@ RUN apt-get update -y && \
 # ── Layer 2: Docker group ─────────────────────────────────────────────────────
 RUN groupadd -f docker && usermod -aG docker vscode
 
-# ── Layer 3: uv ───────────────────────────────────────────────────────────────
-RUN curl -LsSf https://astral.sh/uv/install.sh \
-        | env CARGO_HOME=/opt/uv UV_INSTALL_DIR=/usr/local/bin sh && \
-    rm -rf /opt/uv
+# [H1] uv — download pinned release binary directly (no curl-pipe-sh)
+RUN curl -fsSL "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
+        -o /tmp/uv.tar.gz && \
+    echo "3e1027f26ce8c7e4c32e2277a7fed2cb410f2f1f9320d3df97653d40e21f415b  /tmp/uv.tar.gz" | sha256sum -c - && \
+    tar xzf /tmp/uv.tar.gz -C /usr/local/bin --strip-components=1 && \
+    rm /tmp/uv.tar.gz
 
-# ── Layer 4: Python (pinned via uv) ───────────────────────────────────────────
+# ── Python (pinned via uv) ───────────────────────────────────────────────────
 RUN uv python install ${PYTHON_VERSION} && \
     ln -sf "$(uv python find ${PYTHON_VERSION})" /usr/local/bin/python && \
     ln -sf "$(uv python find ${PYTHON_VERSION})" /usr/local/bin/python3
 
-# ── Layer 5: Python tools (isolated via uv tool) ─────────────────────────────
-RUN uv tool install ruff && \
+# [M4] Python tools — pinned versions, isolated via uv tool
+RUN uv tool install ruff==0.15.6 && \
     uv tool install ty && \
     uv tool install deadcode && \
     uv cache clean
 
-# ── Layer 6: Python runtime libs (system-wide for global availability) ────────
-RUN uv pip install --system --break-system-packages --python ${PYTHON_VERSION} \
-    google-adk \
-    psycopg2-binary \
-    google-cloud-firestore \
-    mcp && \
-    uv cache clean
+# [M6] Removed Layer 6 (system-wide Python libs). These are declared in
+# backend/pyproject.toml and installed via `uv sync` in postCreateCommand.
+# The `mcp` package was unused — removed entirely.
 
-# ── Layer 7: Cloud SQL Auth Proxy ─────────────────────────────────────────────
-# https://cloud.google.com/sql/docs/postgres/sql-proxy
+# [M3] Cloud SQL Auth Proxy — pinned version with checksum verification
 RUN curl -fsSL \
     "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v${CLOUD_SQL_PROXY_VERSION}/cloud-sql-proxy.linux.amd64" \
     -o /usr/local/bin/cloud-sql-proxy && \
+    echo "7efb25ab2f3ef77a2111ba548c8aa7ec53a2dacbc55158c362caefabb0e4ea4b  /usr/local/bin/cloud-sql-proxy" | sha256sum -c - && \
     chmod +x /usr/local/bin/cloud-sql-proxy
 
-# ── Layer 8: act (local GitHub Actions runner) ────────────────────────────────
-RUN curl -fsSL https://github.com/nektos/act/releases/latest/download/act_Linux_x86_64.tar.gz \
+# [M2] act — pinned version with checksum verification
+RUN curl -fsSL "https://github.com/nektos/act/releases/download/v${ACT_VERSION}/act_Linux_x86_64.tar.gz" \
         -o /tmp/act.tgz && \
+    echo "19d4525fb0d80ff50bd3252d3fa47ee1265a331fe4c39249ac65347e527e16e2  /tmp/act.tgz" | sha256sum -c - && \
     tar -xzf /tmp/act.tgz -C /usr/local/bin act && \
     rm /tmp/act.tgz
 
-# ── Layer 9: scc (source line counter) ───────────────────────────────────────
-RUN wget -qO /tmp/scc.tar.gz \
-        https://github.com/boyter/scc/releases/latest/download/scc_Linux_x86_64.tar.gz && \
+# [M2] scc — pinned version with checksum verification
+RUN curl -fsSL "https://github.com/boyter/scc/releases/download/v${SCC_VERSION}/scc_Linux_x86_64.tar.gz" \
+        -o /tmp/scc.tar.gz && \
+    echo "3d9d65b00ca874c2b29151abe7e1480736f5229edc3ce8e4b2791460cdfabf5a  /tmp/scc.tar.gz" | sha256sum -c - && \
     tar xf /tmp/scc.tar.gz -C /usr/local/bin scc && \
     rm /tmp/scc.tar.gz
 
-# ── Layer 10: npm global tools ────────────────────────────────────────────────
-RUN npm install -g firebase-tools && npm cache clean --force
+# [M5][L1] npm global tools — pinned versions, combined into fewer layers.
+# Replaced unmaintained ts-prune with knip.
+RUN npm install -g \
+        firebase-tools@15.10.0 \
+        jscpd@4.0.8 \
+        knip@5.86.0 && \
+    npm cache clean --force
 
-RUN npm install -g jscpd ts-prune && npm cache clean --force
+RUN npm install -g @anthropic-ai/claude-code@2.1.76 && npm cache clean --force
 
-RUN npm install -g @anthropic-ai/claude-code && npm cache clean --force
-
-# ── Layer 11: git defaults (vscode user) ──────────────────────────────────────
+# [H4] git defaults (vscode user) — safe.directory scoped to /workspaces only
 USER vscode
 RUN git config --global push.autoSetupRemote true && \
     git config --global push.default simple && \
@@ -139,5 +145,6 @@ RUN git config --global push.autoSetupRemote true && \
     git config --global diff.colorMoved zebra && \
     git config --global rerere.enabled true && \
     git config --global core.autocrlf input && \
-    git config --global --add safe.directory '*'
-USER root
+    git config --global --add safe.directory /workspaces
+
+# [L2] End as non-root user

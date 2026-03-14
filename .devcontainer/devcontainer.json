@@ -8,10 +8,13 @@
     }
   },
   "remoteUser": "vscode",
+  // SECURITY: Docker socket mount grants container users effective root on the
+  // host. This is required for nested Docker workflows (act, docker compose).
+  // If you only need image builds, consider docker-in-docker feature instead.
   "mounts": [
     "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
     "source=${localEnv:HOME}/.gitconfig,target=/tmp/.host-gitconfig,readonly,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.config/gcloud,target=/home/vscode/.config/gcloud,type=bind"
+    "source=${localEnv:HOME}/.config/gcloud,target=/home/vscode/.config/gcloud,type=bind,readonly"
   ],
   "containerEnv": {
     "GOOGLE_CLOUD_PROJECT": "${localEnv:GOOGLE_CLOUD_PROJECT}",
@@ -19,7 +22,7 @@
     "GCP_REGION": "${localEnv:GCP_REGION}",
     "APP_ENV": "development"
   },
-  "postCreateCommand": "git config --global user.name \"$(git config -f /tmp/.host-gitconfig user.name)\" && git config --global user.email \"$(git config -f /tmp/.host-gitconfig user.email)\"; [ -f backend/pyproject.toml ] && (cd backend && uv sync) || echo 'No backend/pyproject.toml yet — skipping uv sync'",
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
   "forwardPorts": [3000, 8000, 5432, 9099],
   "portsAttributes": {
     "3000": { "label": "Dev server", "onAutoForward": "silent" },
