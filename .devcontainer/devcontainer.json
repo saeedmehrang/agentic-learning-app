@@ -14,7 +14,9 @@
   "mounts": [
     "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
     "source=${localEnv:HOME}/.gitconfig,target=/tmp/.host-gitconfig,readonly,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.config/gcloud,target=/home/vscode/.config/gcloud,type=bind,readonly"
+    "source=${localEnv:HOME}/.config/gcloud,target=/home/vscode/.config/gcloud,type=bind,readonly",
+    // NEW: Mount Claude config directory to persist your authentication between rebuilds
+    "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind"
   ],
   "containerEnv": {
     "GOOGLE_CLOUD_PROJECT": "${localEnv:GOOGLE_CLOUD_PROJECT}",
@@ -23,18 +25,39 @@
     "APP_ENV": "development"
   },
   "postCreateCommand": "bash .devcontainer/post-create.sh",
-  "forwardPorts": [3000, 8000, 5432, 9099],
+  "forwardPorts": [
+    3000,
+    8000,
+    5432,
+    9099
+  ],
   "portsAttributes": {
-    "3000": { "label": "Dev server", "onAutoForward": "silent" },
-    "8000": { "label": "ADK backend", "onAutoForward": "silent" },
-    "5432": { "label": "Cloud SQL proxy (Postgres)", "onAutoForward": "silent" },
-    "9099": { "label": "Firebase emulator (Auth)", "onAutoForward": "silent" }
+    "3000": {
+      "label": "Dev server",
+      "onAutoForward": "silent"
+    },
+    "8000": {
+      "label": "ADK backend",
+      "onAutoForward": "silent"
+    },
+    "5432": {
+      "label": "Cloud SQL proxy (Postgres)",
+      "onAutoForward": "silent"
+    },
+    "9099": {
+      "label": "Firebase emulator (Auth)",
+      "onAutoForward": "silent"
+    }
   },
-  "otherPortsAttributes": { "onAutoForward": "ignore" },
+  "otherPortsAttributes": {
+    "onAutoForward": "ignore"
+  },
   "customizations": {
     "vscode": {
       "extensions": [
-        "GitHub.vscode-pull-request-github"
+        "GitHub.vscode-pull-request-github",
+        // NEW: The official Claude Code VS Code Extension
+        "anthropic.claude-code"
       ],
       "settings": {
         "editor.formatOnSave": true,

@@ -11,6 +11,12 @@ else
   echo "WARNING: Could not read git user.name/user.email from host .gitconfig"
 fi
 
+# Add uv tool binaries (ruff, ty, etc.) to PATH permanently
+UV_TOOL_BIN="$(uv tool dir)/bin"
+if ! grep -qF "$UV_TOOL_BIN" ~/.bashrc 2>/dev/null; then
+  echo "export PATH=\"$UV_TOOL_BIN:\$PATH\"" >> ~/.bashrc
+fi
+
 # Install backend Python dependencies from lockfile
 if [ -f backend/pyproject.toml ]; then
   (cd backend && uv sync)
