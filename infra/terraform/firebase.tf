@@ -25,14 +25,6 @@ resource "google_project_service" "crashlytics_api" {
   disable_on_destroy = false
 }
 
-# Enable Firebase Analytics API (required for Crashlytics BigQuery export)
-resource "google_project_service" "firebase_analytics_api" {
-  provider           = google-beta
-  project            = var.project_id
-  service            = "firebaseanalytics.googleapis.com"
-  disable_on_destroy = false
-}
-
 # ---------------------------------------------------------------------------
 # Attach Firebase to the existing GCP project.
 # Import this resource if the project was already Firebase-ified via console:
@@ -45,7 +37,6 @@ resource "google_firebase_project" "default" {
   depends_on = [
     google_project_service.firebase_api,
     google_project_service.crashlytics_api,
-    google_project_service.firebase_analytics_api,
   ]
 }
 

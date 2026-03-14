@@ -31,3 +31,15 @@ variable "ios_bundle_id" {
   type        = string
   default     = "com.agenticlearning.app"
 }
+
+variable "google_oauth_client_id" {
+  description = "Google OAuth 2.0 client ID for Firebase Google Sign-In (from GCP APIs & Services > Credentials)"
+  type        = string
+}
+
+variable "google_oauth_client_secret" {
+  description = "Google OAuth 2.0 client secret for Firebase Google Sign-In"
+  type        = string
+  sensitive   = true
+}
+

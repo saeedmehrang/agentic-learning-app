@@ -16,6 +16,9 @@ gcloud services enable \
     firestore.googleapis.com \
     identitytoolkit.googleapis.com \
     firebase.googleapis.com \
+    firebasecrashlytics.googleapis.com \
+    cloudbuild.googleapis.com \
+    iap.googleapis.com \
     --project="$GCP_PROJECT_ID"
 
 echo "All APIs enabled successfully."
