@@ -45,21 +45,21 @@ Practical split:
 - [x] Set `DB_PASSWORD` in `.env` and run `./infra/scripts/push_secrets.sh` to push it to Secret Manager (run immediately after `terraform apply`)
 
 ### 0.2 Firebase Project Setup
-- [x] Create Firebase project linked to the GCP project above — done via Firebase console (CLI `projects:addfirebase` returns 403 regardless of IAM; use console instead)
-- [x] Terraform for Firebase written (`infra/terraform/firebase.tf`): enables Firebase/Crashlytics/Analytics APIs, imports Firebase project, registers Android and iOS apps, and writes `google-services.json` / `GoogleService-Info.plist` to the Flutter app directories — **not yet applied/tested**
-- [x] Run `terraform import google_firebase_project.default projects/<project_id>` then `terraform apply` to provision Firebase apps and download config files — migrated to `agentic-learning-app-e13cb` (Firebase-created GCP project)
+- [x] Create Firebase project via Firebase Console — Firebase creates its own GCP project (`agentic-learning-app-e13cb`); use this as the single GCP project for everything (do NOT create a separate GCP project and link — causes two-project confusion). CLI `projects:addfirebase` returns 403 regardless of IAM; console is the only path.
+- [x] Terraform for Firebase written (`infra/terraform/firebase.tf`): enables Firebase/Crashlytics APIs, imports Firebase project, registers Android and iOS apps, writes `google-services.json` / `GoogleService-Info.plist` to Flutter app directories
+- [x] Run `terraform import google_firebase_project.default projects/agentic-learning-app-e13cb` then `terraform apply` — provisions Firebase apps and downloads config files
 - [x] Enable Firebase Authentication (Anonymous provider + Google Sign-In) — via Identity Platform (`auth.tf`); OAuth client secret stored in Secret Manager
 - [x] Enable Firestore in Native mode (us-central1) — provisioned via Terraform
 - [ ] Enable Firebase Analytics and Crashlytics — `firebaseanalytics.googleapis.com` cannot be enabled via CLI/Terraform; must be done via Firebase Console
 - [x] Verify `google-services.json` and `GoogleService-Info.plist` are written to `app/android/app/` and `app/ios/Runner/` respectively after apply
 
 ### 0.3 Cloud SQL Setup
-- [ ] Provision Cloud SQL for PostgreSQL instance (`db-f1-micro` Enterprise edition, POSTGRES_17, same region as Cloud Run) — Terraform written (`infra/terraform/cloudsql.tf`), run `terraform apply` to provision
-- [ ] Enable the `pgvector` extension on the database — `cloudsql.enable_pgvector` flag set in Terraform; run `./infra/scripts/enable_pgvector.sh` after apply to create the extension inside the DB
-- [ ] Create application database and dedicated DB user with scoped permissions — Terraform written (`google_sql_database`, `google_sql_user`)
-- [ ] Configure private IP (VPC) access between Cloud SQL and Cloud Run — Terraform written (`google_compute_global_address`, `google_service_networking_connection`)
+- [x] Provision Cloud SQL for PostgreSQL 17 instance (`db-f1-micro` Enterprise edition, `us-central1`) — provisioned via `infra/terraform/cloudsql.tf`
+- [ ] Enable the `pgvector` extension on the database — run `./infra/scripts/enable_pgvector.sh` (requires `cloud-sql-proxy` + `psql` installed locally)
+- [x] Create application database (`learning_app`) and dedicated DB user (`app_user`) with password from Secret Manager — Terraform managed
+- [x] Configure private IP (VPC) access between Cloud SQL and Cloud Run — VPC peering provisioned via Terraform (`google_compute_global_address`, `google_service_networking_connection`)
 - [ ] Test connection from local machine via Cloud SQL Auth Proxy
-- [ ] Set `DB_CONNECTION_NAME` in `.env` (`project:region:instance`) and re-run `./infra/scripts/push_secrets.sh` to push it to Secret Manager — script auto-reads from `terraform output` after apply
+- [x] Set `DB_CONNECTION_NAME` in Secret Manager — auto-pushed by `push_secrets.sh` reading `terraform output cloud_sql_connection_name`
 
 ### 0.4 Local Development Environment
 - [ ] Install and configure Google Cloud SDK (`gcloud` CLI)
