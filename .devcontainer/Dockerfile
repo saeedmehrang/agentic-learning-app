@@ -60,6 +60,7 @@ RUN apt-get update -y && \
         gh \
         terraform=${TERRAFORM_VERSION}-1 \
         google-cloud-cli \
+        postgresql-client \
         ripgrep fd-find jq yq bat tree sd && \
     \
     # Debian name quirks: fd-find => fd, bat => bat
