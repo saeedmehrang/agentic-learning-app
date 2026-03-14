@@ -11,6 +11,17 @@ Self-paced mobile learning platform for Linux basics. Bite-sized 7–10 minute s
 | Knowledge store | Cloud SQL for PostgreSQL 17 + pgvector |
 | Learner memory | Firestore |
 
+## Python Version
+
+Pinned in [`.python-version`](.python-version). When upgrading, update all four places:
+
+| File | Field |
+|---|---|
+| `.python-version` | version number (source of truth) |
+| `.devcontainer/Dockerfile` | `ARG PYTHON_VERSION=` |
+| `.devcontainer/devcontainer.json` | `build.args.PYTHON_VERSION` |
+| `backend/pyproject.toml` | `requires-python` and `ruff target-version` |
+
 ## Repository Layout
 
 ```

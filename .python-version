@@ -1,1 +1,6 @@
 3.13
+# This is the canonical Python version for the project.
+# When upgrading, also update these files:
+#   .devcontainer/Dockerfile      — ARG PYTHON_VERSION=<version>
+#   .devcontainer/devcontainer.json — build.args.PYTHON_VERSION
+#   backend/pyproject.toml        — requires-python and ruff target-version
