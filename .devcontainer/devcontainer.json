@@ -2,7 +2,10 @@
   "name": "${localWorkspaceFolderBasename}",
   "build": {
     "dockerfile": "Dockerfile",
-    "context": ".."
+    "context": "..",
+    "args": {
+      "PYTHON_VERSION": "3.13"
+    }
   },
   "remoteUser": "node",
   "mounts": [
@@ -16,7 +19,7 @@
     "GCP_REGION": "${localEnv:GCP_REGION}",
     "APP_ENV": "development"
   },
-  "postCreateCommand": "[ -f pyproject.toml ] && uv sync && uv run pre-commit install || echo 'No pyproject.toml yet — skipping uv sync'",
+  "postCreateCommand": "[ -f backend/pyproject.toml ] && (cd backend && uv sync) || echo 'No backend/pyproject.toml yet — skipping uv sync'",
   "forwardPorts": [3000, 8000, 5432, 9099],
   "portsAttributes": {
     "3000": { "label": "Dev server" },
@@ -39,7 +42,7 @@
       ],
       "settings": {
         "editor.formatOnSave": true,
-        "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+        "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/bin/python",
         "python.terminal.activateEnvironment": true,
         "[python]": {
           "editor.defaultFormatter": "charliermarsh.ruff"

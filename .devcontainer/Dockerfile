@@ -2,40 +2,44 @@
 
 # --- Build args (can be overridden from devcontainer.json) ---
 ARG NODE_VERSION=24
+# Keep in sync with /.python-version
+ARG PYTHON_VERSION=3.13
 
 # Use the Node version in the base image tag
 FROM mcr.microsoft.com/devcontainers/typescript-node:${NODE_VERSION}
 
 # Re-declare args if you want to use them in later RUNs
 ARG NODE_VERSION
+ARG PYTHON_VERSION
 
 # Optional: expose them as env vars inside the container
 ENV NODE_VERSION=${NODE_VERSION}
+ENV PYTHON_VERSION=${PYTHON_VERSION}
 
-# Install Python 3 (uses distro default - Python 3.13 on Debian Trixie)
+# Install minimal system deps (wget needed by later steps; avoid installing distro Python)
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
-    python3 \
-    python3-venv \
-    python3-pip \
     wget && \
     rm -rf /var/lib/apt/lists/*
 
-# Make python3 the default "python" command
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1
-
-# Install uv (Astral) - fast Python package installer
+# Install uv (Astral) - manages both Python versions and packages
 RUN curl -LsSf https://astral.sh/uv/install.sh | env CARGO_HOME=/opt/uv UV_INSTALL_DIR=/usr/local/bin sh
 
-# Install Python tools system-wide using pip
-# Using --break-system-packages is acceptable in containers
-# This ensures tools are available globally with correct permissions
-RUN python3 -m pip install --no-cache-dir --break-system-packages \
-    ruff \
+# Install the pinned Python version via uv and make it the default python/python3
+RUN uv python install ${PYTHON_VERSION} && \
+    ln -sf "$(uv python find ${PYTHON_VERSION})" /usr/local/bin/python && \
+    ln -sf "$(uv python find ${PYTHON_VERSION})" /usr/local/bin/python3
+
+# Install Python tools system-wide using uv (uses the pinned Python version)
+# Using --system so tools are available globally without activating a venv
+RUN uv tool install ruff && \
+    uv tool install ty && \
+    uv pip install --system --python ${PYTHON_VERSION} \
     deadcode \
     pytest \
-    ty \
-    google-adk
+    google-adk \
+    psycopg2-binary \
+    google-cloud-firestore
 
 # Install Docker CLI
 # https://docs.docker.com/engine/install/debian/

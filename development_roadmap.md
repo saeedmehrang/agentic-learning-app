@@ -62,11 +62,11 @@ Practical split:
 - [x] Set `DB_CONNECTION_NAME` in Secret Manager — auto-pushed by `push_secrets.sh` reading `terraform output cloud_sql_connection_name`
 
 ### 0.4 Local Development Environment
-- [ ] Install and configure Google Cloud SDK (`gcloud` CLI)
+- [x] Install and configure Google Cloud SDK (`gcloud` CLI)
 - [ ] Install ADK CLI and Python dependencies (`google-adk`, `psycopg2`, `google-cloud-firestore`)
 - [ ] Install Flutter SDK and set up iOS Simulator + Android Emulator
-- [ ] Create a `.env` file template with all required env vars (committed as `.env.example`, real file gitignored)
-- [ ] Set up Git repository with branch protection on `main`
+- [x] Create a `.env` file template with all required env vars (committed as `.env.example`, real file gitignored)
+- [x] Set up Git repository with branch protection on `main`
 
 ---
 
