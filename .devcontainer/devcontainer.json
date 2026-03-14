@@ -14,8 +14,9 @@
   "mounts": [
     "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
     "source=${localEnv:HOME}/.gitconfig,target=/tmp/.host-gitconfig,readonly,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.config/gcloud,target=/home/vscode/.config/gcloud,type=bind,readonly",
-    // NEW: Mount Claude config directory to persist your authentication between rebuilds
+    // Fixed: Removed 'readonly' so gcloud can update credentials/tokens
+    "source=${localEnv:HOME}/.config/gcloud,target=/home/vscode/.config/gcloud,type=bind",
+    // Added: Persist Claude Code authentication and settings
     "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind"
   ],
   "containerEnv": {
@@ -56,7 +57,6 @@
     "vscode": {
       "extensions": [
         "GitHub.vscode-pull-request-github",
-        // NEW: The official Claude Code VS Code Extension
         "anthropic.claude-code"
       ],
       "settings": {
