@@ -63,8 +63,8 @@ Practical split:
 
 ### 0.4 Local Development Environment
 - [x] Install and configure Google Cloud SDK (`gcloud` CLI)
-- [ ] Install ADK CLI and Python dependencies (`google-adk`, `psycopg2`, `google-cloud-firestore`)
-- [ ] Install Flutter SDK and set up iOS Simulator + Android Emulator
+- [x] Install ADK CLI and Python dependencies (`google-adk`, `psycopg2-binary`, `google-cloud-firestore`) — baked into devcontainer Dockerfile; `backend/pyproject.toml` locks versions via `uv`
+- [ ] Install Flutter SDK and set up iOS Simulator + Android Emulator — runs natively on host machine, not in devcontainer (see Dev Environment note above)
 - [x] Create a `.env` file template with all required env vars (committed as `.env.example`, real file gitignored)
 - [x] Set up Git repository with branch protection on `main`
 
