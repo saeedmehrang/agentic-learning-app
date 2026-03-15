@@ -97,6 +97,8 @@ Practical split:
 - [ ] Ensure every question has `correct_answer`, `distractors[]`, and `explanation` fields populated
 
 ### 1.4 Database Loading
+> **Note:** Before starting this phase, check Claude memory file `project_phase14_db_seeding.md` — VPC connector and Cloud Run Job infrastructure must be in place before any seeding scripts can run. See also Phase 3.2 (VPC connector) which may need to be pulled forward.
+
 - [ ] Run Cloud SQL schema migrations to create `lessons`, `content_chunks`, and `quiz_questions` tables
 - [ ] Write a database seeding script to bulk-insert all approved content chunks with their vector embeddings
 - [ ] Write a database seeding script to bulk-insert all approved quiz questions

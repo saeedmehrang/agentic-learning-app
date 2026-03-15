@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
 # enable_pgvector.sh
 # One-time post-apply step: enables the pgvector extension inside the
-# learning_app database via Cloud SQL Auth Proxy.
+# learning_app database.
+#
+# The Cloud SQL instance has no public IP and lives inside a VPC, so the
+# Cloud SQL Auth Proxy cannot reach it from a local devcontainer.
+# This script uses `gcloud sql connect`, which tunnels through the Cloud SQL
+# API (no direct VPC access required from the caller).
 #
 # Prerequisites:
-#   - cloud-sql-proxy installed (brew install cloud-sql-proxy or gcloud components install cloud-sql-proxy)
-#   - psql installed
-#   - Authenticated: gcloud auth application-default login
-#   - .env file present with DB_CONNECTION_NAME and DB_PASSWORD set
+#   - gcloud CLI authenticated: gcloud auth login
+#   - psql installed (used under the hood by gcloud sql connect)
+#   - Caller has roles/cloudsql.client on the instance
 #
 # Usage:
 #   ./infra/scripts/enable_pgvector.sh
+#
+# Recommended: run from Cloud Shell (https://shell.cloud.google.com) where
+# gcloud and psql are pre-installed and IAM auth is automatic.
 
 set -euo pipefail
 
@@ -22,30 +29,25 @@ if [[ -f "$ENV_FILE" ]]; then
   set -o allexport && source "$ENV_FILE" && set +o allexport
 fi
 
-: "${DB_CONNECTION_NAME:?DB_CONNECTION_NAME must be set in .env}"
+: "${GCP_PROJECT_ID:=agentic-learning-app-e13cb}"
+: "${DB_INSTANCE_NAME:=learning-app-db}"
 : "${DB_NAME:=learning_app}"
 : "${DB_USER:=app_user}"
-: "${DB_PORT:=5432}"
 
 # Fetch DB_PASSWORD from Secret Manager (never stored in .env)
-DB_PASSWORD=$(gcloud secrets versions access latest --secret="DB_PASSWORD" --project="${GCP_PROJECT_ID:-agentic-learning-app-e13cb}" 2>/dev/null)
+DB_PASSWORD=$(gcloud secrets versions access latest --secret="DB_PASSWORD" --project="${GCP_PROJECT_ID}" 2>/dev/null)
 
 if [[ -z "$DB_PASSWORD" ]]; then
   echo "ERROR: Could not read DB_PASSWORD from Secret Manager. Run push_secrets.sh first." >&2
   exit 1
 fi
 
-echo "Starting Cloud SQL Auth Proxy for ${DB_CONNECTION_NAME}..."
-cloud-sql-proxy "${DB_CONNECTION_NAME}" --port "${DB_PORT}" &
-PROXY_PID=$!
-trap 'kill $PROXY_PID 2>/dev/null; exit' INT TERM EXIT
-
-# Wait for proxy to be ready
-sleep 3
-
-echo "Enabling pgvector extension in ${DB_NAME}..."
-PGPASSWORD="$DB_PASSWORD" psql \
-  "host=127.0.0.1 port=${DB_PORT} dbname=${DB_NAME} user=${DB_USER} sslmode=disable" \
-  -c "CREATE EXTENSION IF NOT EXISTS vector;"
+echo "Enabling pgvector extension in ${DB_NAME} on instance ${DB_INSTANCE_NAME}..."
+echo "CREATE EXTENSION IF NOT EXISTS vector;" | \
+  PGPASSWORD="$DB_PASSWORD" gcloud sql connect "${DB_INSTANCE_NAME}" \
+    --user="${DB_USER}" \
+    --database="${DB_NAME}" \
+    --project="${GCP_PROJECT_ID}" \
+    --quiet
 
 echo "pgvector enabled successfully."
