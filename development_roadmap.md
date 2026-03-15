@@ -83,11 +83,11 @@ Practical split:
 ### 1.2 Content Generation Pipeline
 - [ ] Write a Python content generation script that:
   - Takes a lesson outline as input
-  - Calls Gemini 2.5 Flash to generate 3 difficulty tier variants (Beginner / Intermediate / Advanced) per lesson
+  - Calls Gemini 3 Flash to generate 3 difficulty tier variants (Beginner / Intermediate / Advanced) per lesson
   - Outputs structured JSON per content chunk
 - [ ] Run content generation for all 29 lessons × 3 tiers = 87 content chunks
 - [ ] Human review: read and approve all generated content — flag any lessons needing regeneration or manual edits
-- [ ] Embed all approved content chunks using Vertex AI `text-embedding-004` (768-dim vectors)
+- [ ] Embed all approved content chunks using Vertex AI `text-embedding-005` (768-dim vectors)
 
 ### 1.3 Quiz Question Generation
 - [ ] Extend the content pipeline script to generate quiz questions per lesson per tier:
