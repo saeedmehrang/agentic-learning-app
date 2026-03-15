@@ -1,0 +1,617 @@
+# Linux Basics Course — Lesson Outlines
+# 9 modules, 29 lessons
+# Source of truth for AI-generated lesson content and quiz questions.
+
+- lesson_id: L01
+  module_id: 1
+  title: "The History of Linux"
+  learning_objectives:
+    - "Explain the origins of Linux, including the roles of Unix, Minix, and Linus Torvalds"
+    - "Identify key milestones in Linux's development from 1991 to the present"
+    - "Describe why Linux became the dominant OS in servers, embedded systems, and supercomputers"
+  key_concepts:
+    - "Unix heritage"
+    - "Linus Torvalds"
+    - "open source movement"
+    - "Linux kernel v1.0"
+    - "GNU project"
+  example_commands_or_scenarios:
+    - "uname -r  # print the running kernel version"
+    - "uname -a  # print all system information including kernel, hostname, and architecture"
+    - "Scenario: A developer in 1991 wants an OS for their 386 PC — they download Linus's first public release"
+    - "Scenario: Comparing a 1970s Bell Labs Unix machine to a modern Linux server in the cloud"
+  prerequisites: []
+
+- lesson_id: L02
+  module_id: 1
+  title: "Linux Distributions"
+  learning_objectives:
+    - "Explain what a Linux distribution is and how it differs from the kernel alone"
+    - "Identify at least four major distributions and their typical use cases (Ubuntu, Fedora, Arch, Debian)"
+    - "Describe the role of a package manager in a distribution"
+  key_concepts:
+    - "Linux distribution"
+    - "package manager"
+    - "Ubuntu"
+    - "Debian"
+    - "rolling vs stable release"
+  example_commands_or_scenarios:
+    - "cat /etc/os-release  # identify the current distribution and version"
+    - "lsb_release -a       # show distribution-specific information"
+    - "Scenario: Choosing Ubuntu LTS for a production web server vs Arch Linux for a custom desktop"
+    - "Scenario: A company standardises on RHEL for support contracts while a hobbyist runs Fedora"
+  prerequisites:
+    - L01
+
+- lesson_id: L03
+  module_id: 1
+  title: "Kernel, OS, and Open Source"
+  learning_objectives:
+    - "Explain the distinction between the Linux kernel, the OS userland, and a full distribution"
+    - "Describe what open source means, including the GPL licence and its implications"
+    - "Identify the layers of a Linux system: hardware, kernel, system libraries, shell, and applications"
+  key_concepts:
+    - "Linux kernel"
+    - "userland"
+    - "GNU GPL"
+    - "open source licence"
+    - "system call interface"
+  example_commands_or_scenarios:
+    - "uname -r              # confirm kernel version"
+    - "ls /usr/bin | head    # explore userland binaries shipped with the distribution"
+    - "Scenario: A company forks Linux to create a custom embedded OS — GPL requires they publish changes"
+    - "Scenario: Tracing what happens when you type 'ls': shell → system call → kernel → filesystem"
+  prerequisites:
+    - L01
+    - L02
+
+- lesson_id: L04
+  module_id: 2
+  title: "The Shell and the Terminal"
+  learning_objectives:
+    - "Explain the difference between a terminal emulator, a shell, and the kernel"
+    - "Identify the Bash prompt components: user, hostname, current directory, and prompt character"
+    - "Run basic shell built-ins to confirm your shell version and environment"
+  key_concepts:
+    - "terminal emulator"
+    - "shell"
+    - "Bash"
+    - "prompt"
+    - "stdin/stdout/stderr"
+  example_commands_or_scenarios:
+    - "echo $SHELL          # print the current shell path"
+    - "bash --version       # confirm Bash version"
+    - "echo 'Hello, Linux!' # write text to stdout"
+    - "Scenario: Opening a terminal on Ubuntu Desktop and recognising each part of the prompt string"
+  prerequisites:
+    - L03
+
+- lesson_id: L05
+  module_id: 2
+  title: "Command Syntax and Structure"
+  learning_objectives:
+    - "Identify the three parts of a Linux command: command name, options, and arguments"
+    - "Explain the difference between short options (-l) and long options (--list)"
+    - "Run commands with multiple options and arguments and predict their output"
+  key_concepts:
+    - "command syntax"
+    - "flags and options"
+    - "arguments"
+    - "command chaining with semicolons"
+    - "exit codes"
+  example_commands_or_scenarios:
+    - "ls -l /etc           # list with long format, passing a path argument"
+    - "ls -la --color=auto  # combine short and long options"
+    - "echo $?              # check exit code of the previous command"
+    - "date ; whoami ; uname -n  # chain three commands with semicolons"
+  prerequisites:
+    - L04
+
+- lesson_id: L06
+  module_id: 2
+  title: "Getting Help with Man Pages"
+  learning_objectives:
+    - "Run man <command> to open and navigate a manual page"
+    - "Identify the sections of a man page: NAME, SYNOPSIS, DESCRIPTION, OPTIONS, EXAMPLES"
+    - "Use --help and info to find quick reference information for any command"
+  key_concepts:
+    - "man pages"
+    - "manual sections"
+    - "SYNOPSIS notation"
+    - "--help flag"
+    - "info command"
+  example_commands_or_scenarios:
+    - "man ls               # open the manual page for ls"
+    - "man 5 passwd         # open section 5 (file formats) for passwd"
+    - "ls --help            # print a short usage summary"
+    - "man -k 'copy file'   # search man page descriptions by keyword"
+  prerequisites:
+    - L05
+
+- lesson_id: L07
+  module_id: 2
+  title: "Pipes, Redirection, and Bash Productivity"
+  learning_objectives:
+    - "Use | to pipe the output of one command into another, chaining commands together"
+    - "Redirect stdout and stderr to files using >, >>, and 2>"
+    - "Use Tab completion and Ctrl+R history search to work faster at the command line"
+  key_concepts:
+    - "pipe operator"
+    - "stdout redirection (> and >>)"
+    - "stderr redirection (2>)"
+    - "Tab completion"
+    - "command history"
+  example_commands_or_scenarios:
+    - "ps aux | grep nginx            # pipe ps output into grep to find a process"
+    - "ls /etc | sort | head -10      # chain three commands with pipes"
+    - "echo 'hello' > output.txt      # redirect stdout to a file (overwrite)"
+    - "echo 'world' >> output.txt     # append stdout to a file"
+    - "curl https://example.com 2> errors.txt  # redirect stderr to a file"
+    - "Ctrl+R then 'apt'              # reverse-search history for a command containing 'apt'"
+  prerequisites:
+    - L05
+    - L06
+
+- lesson_id: L08
+  module_id: 3
+  title: "The Linux Filesystem Hierarchy"
+  learning_objectives:
+    - "Identify the purpose of the top-level directories in the Filesystem Hierarchy Standard (FHS)"
+    - "Explain the difference between absolute and relative paths"
+    - "Describe where system binaries, configuration files, user home directories, and device files live"
+  key_concepts:
+    - "Filesystem Hierarchy Standard"
+    - "absolute path"
+    - "relative path"
+    - "root directory /"
+    - "mount points"
+  example_commands_or_scenarios:
+    - "ls /                 # list top-level directories"
+    - "ls /etc | head -20   # explore configuration files"
+    - "ls /home             # see user home directories"
+    - "Scenario: Understanding why /usr/bin vs /bin exist and how /tmp is cleaned on reboot"
+  prerequisites:
+    - L07
+
+- lesson_id: L09
+  module_id: 3
+  title: "Navigating the Filesystem: pwd, ls, and cd"
+  learning_objectives:
+    - "Run pwd to print the current working directory"
+    - "Run ls with common options (-l, -a, -h, -t) to list directory contents"
+    - "Navigate the filesystem using cd with absolute paths, relative paths, ~ and .."
+  key_concepts:
+    - "working directory"
+    - "pwd"
+    - "ls options"
+    - "cd navigation"
+    - "hidden files"
+  example_commands_or_scenarios:
+    - "pwd                  # print current directory"
+    - "ls -lah /var/log     # long listing, show hidden, human-readable sizes"
+    - "cd /etc && pwd       # change to /etc and confirm"
+    - "cd ../..             # move two levels up the directory tree"
+  prerequisites:
+    - L08
+
+- lesson_id: L10
+  module_id: 3
+  title: "Creating and Removing Files and Directories"
+  learning_objectives:
+    - "Run mkdir (including mkdir -p) to create single and nested directories"
+    - "Run touch to create empty files and update timestamps"
+    - "Run rm and rmdir safely, understanding the danger of rm -rf"
+  key_concepts:
+    - "mkdir"
+    - "touch"
+    - "rm and rm -rf"
+    - "rmdir"
+    - "inode"
+  example_commands_or_scenarios:
+    - "mkdir -p ~/projects/linux/notes  # create nested directories in one command"
+    - "touch ~/projects/linux/notes/day1.txt  # create an empty file"
+    - "rm ~/projects/linux/notes/day1.txt     # delete a file"
+    - "rm -rf ~/projects/linux/notes          # recursively delete a directory (use with care)"
+  prerequisites:
+    - L09
+
+- lesson_id: L11
+  module_id: 3
+  title: "File Permissions Overview"
+  learning_objectives:
+    - "Read a permission string (e.g. -rwxr-xr--) and identify owner, group, and other access"
+    - "Explain the meaning of read (r), write (w), and execute (x) for files and directories"
+    - "Run ls -l to inspect permissions on files and directories"
+  key_concepts:
+    - "permission string"
+    - "owner / group / other"
+    - "read write execute"
+    - "octal notation"
+    - "ls -l output"
+  example_commands_or_scenarios:
+    - "ls -l /etc/passwd    # inspect permissions on a system file"
+    - "ls -ld /tmp          # inspect permissions on a sticky-bit directory"
+    - "Scenario: A script is not running — ls -l reveals it lacks execute permission"
+    - "Scenario: Decoding -rwxr-xr-- as owner can read/write/execute, group can read/execute, others can read only"
+  prerequisites:
+    - L10
+
+- lesson_id: L12
+  module_id: 4
+  title: "Viewing File Contents: cat, less, head, and tail"
+  learning_objectives:
+    - "Run cat to print file contents to the terminal"
+    - "Run less to page through large files and use / to search within them"
+    - "Run head and tail (including tail -f) to inspect the beginning and end of files"
+  key_concepts:
+    - "cat"
+    - "less pager"
+    - "head and tail"
+    - "tail -f live follow"
+    - "stdout redirection"
+  example_commands_or_scenarios:
+    - "cat /etc/hostname            # print the hostname file"
+    - "less /var/log/syslog         # page through a large log file"
+    - "head -20 /etc/passwd         # show the first 20 lines"
+    - "tail -f /var/log/syslog      # follow a log file in real time"
+  prerequisites:
+    - L11
+
+- lesson_id: L13
+  module_id: 4
+  title: "Editing Files with nano"
+  learning_objectives:
+    - "Open, edit, save, and exit a file using nano — including recovering from an accidental exit"
+    - "Use nano shortcuts to cut, paste, search, and replace text within a file"
+    - "Edit a real system-adjacent config file (e.g. /etc/hosts copy) confidently, knowing how to undo mistakes"
+  key_concepts:
+    - "nano editor"
+    - "Ctrl shortcuts"
+    - "write-out (save)"
+    - "search and replace in nano"
+    - "text editor alternatives (vim, gedit)"
+  example_commands_or_scenarios:
+    - "nano ~/notes.txt             # open or create a file for editing"
+    - "Ctrl+O then Enter            # write out (save) the file without exiting"
+    - "Ctrl+W then 'error'          # search forward for the word 'error'"
+    - "Ctrl+\\ then 'foo' then 'bar' # search and replace 'foo' with 'bar'"
+    - "Ctrl+K / Ctrl+U             # cut and paste the current line"
+    - "Scenario: Editing a copy of /etc/hosts to add a local dev alias — saving without breaking the file"
+  prerequisites:
+    - L12
+
+- lesson_id: L14
+  module_id: 4
+  title: "Copying, Moving, and Wildcards"
+  learning_objectives:
+    - "Run cp and mv to copy and move files and directories"
+    - "Use wildcards (* and ?) to match multiple files in a single command"
+    - "Explain how cp -r and mv behave differently when applied to directories"
+  key_concepts:
+    - "cp"
+    - "mv"
+    - "wildcards"
+    - "glob patterns"
+    - "cp -r recursive copy"
+  example_commands_or_scenarios:
+    - "cp /etc/hosts ~/hosts.bak          # copy a file to home directory as a backup"
+    - "mv ~/hosts.bak ~/backups/          # move the backup into a subdirectory"
+    - "cp -r ~/projects/linux ~/projects/linux-backup  # recursively copy a directory"
+    - "rm ~/backups/*.bak                 # delete all .bak files using a wildcard"
+  prerequisites:
+    - L13
+
+- lesson_id: L15
+  module_id: 5
+  title: "Users and Groups"
+  learning_objectives:
+    - "Explain the difference between the root user, system users, and regular users"
+    - "Run id, whoami, and groups to inspect the current user's identity and group memberships"
+    - "Identify how /etc/passwd and /etc/group store user and group information"
+  key_concepts:
+    - "root user"
+    - "UID and GID"
+    - "groups"
+    - "/etc/passwd"
+    - "/etc/group"
+  example_commands_or_scenarios:
+    - "whoami                         # print the current username"
+    - "id                             # print UID, GID, and all group memberships"
+    - "cat /etc/passwd | head -5      # inspect the passwd file format"
+    - "groups alice                   # list all groups that user alice belongs to"
+  prerequisites:
+    - L14
+
+- lesson_id: L16
+  module_id: 5
+  title: "Changing Permissions with chmod and chown"
+  learning_objectives:
+    - "Run chmod with both symbolic (u+x) and octal (755) notation to change file permissions"
+    - "Run chown to change the owner and group of a file"
+    - "Explain when and why you would make a script executable with chmod +x"
+  key_concepts:
+    - "chmod"
+    - "symbolic notation"
+    - "octal notation"
+    - "chown"
+    - "execute bit"
+  example_commands_or_scenarios:
+    - "chmod +x myscript.sh           # add execute permission for all"
+    - "chmod 644 config.cfg           # owner read/write, group and others read-only"
+    - "chmod u=rwx,g=rx,o=r file.txt  # symbolic notation for the same as 754"
+    - "chown alice:developers file.txt  # change owner to alice, group to developers"
+  prerequisites:
+    - L15
+
+- lesson_id: L17
+  module_id: 5
+  title: "sudo, su, and Managing Passwords"
+  learning_objectives:
+    - "Run commands as root using sudo and explain why it is safer than logging in as root"
+    - "Use su to switch to another user account within the same terminal session"
+    - "Run passwd to change a user's password and describe where password hashes are stored"
+  key_concepts:
+    - "sudo"
+    - "sudoers file"
+    - "su"
+    - "passwd command"
+    - "/etc/shadow"
+  example_commands_or_scenarios:
+    - "sudo apt update                # run apt update as root via sudo"
+    - "sudo -l                        # list commands the current user may run with sudo"
+    - "su - bob                       # switch to user bob with a login shell"
+    - "passwd                         # change your own password interactively"
+  prerequisites:
+    - L16
+
+- lesson_id: L18
+  module_id: 6
+  title: "Viewing Processes: ps and top"
+  learning_objectives:
+    - "Run ps aux to list all running processes and identify key columns (PID, CPU, MEM, CMD)"
+    - "Run top and htop to view a live, updating process table"
+    - "Explain what a PID is and how it relates to process management"
+  key_concepts:
+    - "process"
+    - "PID"
+    - "ps aux"
+    - "top"
+    - "CPU and memory usage"
+  example_commands_or_scenarios:
+    - "ps aux                         # list all processes from all users"
+    - "ps aux | grep nginx            # find the PID of a running nginx process"
+    - "top                            # interactive live process viewer"
+    - "Scenario: Server is slow — use top to identify a runaway process consuming 100% CPU"
+  prerequisites:
+    - L17
+
+- lesson_id: L19
+  module_id: 6
+  title: "Killing Processes and Job Control"
+  learning_objectives:
+    - "Run kill and killall to terminate processes by PID and name"
+    - "Use & to start a process in the background and jobs to list background jobs"
+    - "Use fg and bg to move jobs between foreground and background, and Ctrl+Z to suspend"
+  key_concepts:
+    - "kill signals"
+    - "SIGTERM and SIGKILL"
+    - "background jobs"
+    - "jobs built-in"
+    - "fg and bg"
+  example_commands_or_scenarios:
+    - "kill 1234                      # send SIGTERM to process with PID 1234"
+    - "kill -9 1234                   # force-kill (SIGKILL) an unresponsive process"
+    - "sleep 300 &                    # start a sleep command in the background"
+    - "jobs; fg %1                    # list background jobs, then bring job 1 to foreground"
+  prerequisites:
+    - L18
+
+- lesson_id: L20
+  module_id: 6
+  title: "systemd Basics: Services and Boot"
+  learning_objectives:
+    - "Run systemctl status, start, stop, and restart to manage system services"
+    - "Explain the role of systemd as PID 1 and the init system on modern Linux"
+    - "Use systemctl enable and disable to control which services start at boot"
+  key_concepts:
+    - "systemd"
+    - "unit files"
+    - "systemctl"
+    - "service lifecycle"
+    - "PID 1"
+  example_commands_or_scenarios:
+    - "systemctl status nginx         # check if the nginx service is running"
+    - "sudo systemctl restart ssh     # restart the SSH daemon"
+    - "sudo systemctl enable nginx    # enable nginx to start on boot"
+    - "journalctl -u nginx -n 50      # view the last 50 log lines for the nginx unit"
+  prerequisites:
+    - L19
+
+- lesson_id: L21
+  module_id: 7
+  title: "Testing Connectivity: ping, curl, and wget"
+  learning_objectives:
+    - "Run ping to test network reachability and interpret packet loss and round-trip time"
+    - "Run curl to make HTTP requests from the command line and inspect response headers and body"
+    - "Run wget to download files non-interactively from a URL"
+  key_concepts:
+    - "ping"
+    - "ICMP"
+    - "curl"
+    - "wget"
+    - "HTTP request/response"
+  example_commands_or_scenarios:
+    - "ping -c 4 8.8.8.8             # send 4 ICMP packets to Google DNS"
+    - "curl -I https://example.com   # fetch only HTTP response headers"
+    - "curl -o page.html https://example.com  # save response body to a file"
+    - "wget https://example.com/file.tar.gz   # download a file to the current directory"
+  prerequisites:
+    - L20
+
+- lesson_id: L22
+  module_id: 7
+  title: "Remote Access with SSH"
+  learning_objectives:
+    - "Run ssh user@host to open a remote shell session on another machine"
+    - "Explain how SSH key-based authentication works and generate an SSH key pair with ssh-keygen"
+    - "Use scp to securely copy files between local and remote machines"
+  key_concepts:
+    - "SSH protocol"
+    - "key-based authentication"
+    - "ssh-keygen"
+    - "authorized_keys"
+    - "scp"
+  example_commands_or_scenarios:
+    - "ssh alice@192.168.1.10        # connect to a remote host as user alice"
+    - "ssh-keygen -t ed25519         # generate an Ed25519 SSH key pair"
+    - "ssh-copy-id alice@192.168.1.10  # install the public key on the remote host"
+    - "scp report.txt alice@192.168.1.10:~/docs/  # copy a file to the remote machine"
+  prerequisites:
+    - L21
+
+- lesson_id: L23
+  module_id: 7
+  title: "IP Basics and /etc/hosts"
+  learning_objectives:
+    - "Run ip addr and ip route to inspect network interfaces and the routing table"
+    - "Explain the purpose of /etc/hosts and add a custom hostname entry"
+    - "Describe the difference between a private IP address and a public IP address"
+  key_concepts:
+    - "IP address"
+    - "network interface"
+    - "ip addr"
+    - "/etc/hosts"
+    - "DNS vs hosts file"
+  example_commands_or_scenarios:
+    - "ip addr show                  # list all network interfaces and their IP addresses"
+    - "ip route show                 # display the routing table"
+    - "cat /etc/hosts                # view current hostname-to-IP mappings"
+    - "sudo nano /etc/hosts          # add a custom entry such as '127.0.0.1 myapp.local'"
+  prerequisites:
+    - L22
+
+- lesson_id: L24
+  module_id: 8
+  title: "Installing Software with apt"
+  learning_objectives:
+    - "Run apt update and apt upgrade to refresh the package index and upgrade installed packages"
+    - "Run apt install and apt remove to install and uninstall software"
+    - "Explain what a package repository is and how /etc/apt/sources.list controls which repos are used"
+  key_concepts:
+    - "apt"
+    - "package repository"
+    - "package index"
+    - "apt install / remove"
+    - "sources.list"
+  example_commands_or_scenarios:
+    - "sudo apt update                # refresh the local package index from all repositories"
+    - "sudo apt install tree          # install the tree utility"
+    - "sudo apt remove tree           # remove tree (keep config files)"
+    - "sudo apt autoremove            # remove unused dependency packages"
+  prerequisites:
+    - L23
+
+- lesson_id: L25
+  module_id: 8
+  title: "dpkg and System Updates"
+  learning_objectives:
+    - "Run dpkg -l to list installed packages and dpkg -i to install a local .deb file"
+    - "Run apt full-upgrade to perform a complete system upgrade"
+    - "Explain the difference between apt and dpkg and when to use each"
+  key_concepts:
+    - "dpkg"
+    - ".deb package"
+    - "apt vs dpkg"
+    - "full-upgrade"
+    - "package dependencies"
+  example_commands_or_scenarios:
+    - "dpkg -l | grep nginx          # check if nginx is installed and its version"
+    - "sudo dpkg -i mypackage.deb    # install a locally downloaded .deb file"
+    - "sudo apt full-upgrade         # upgrade all packages, handling dependency changes"
+    - "dpkg -L nginx                 # list all files installed by the nginx package"
+  prerequisites:
+    - L24
+
+- lesson_id: L26
+  module_id: 9
+  title: "Shebang and Script Structure"
+  learning_objectives:
+    - "Write a minimal Bash script with a correct shebang line and make it executable"
+    - "Run a script using ./script.sh and bash script.sh and explain the difference"
+    - "Identify the essential structural elements of a Bash script: shebang, comments, commands"
+  key_concepts:
+    - "shebang (#!)"
+    - "bash script structure"
+    - "execute permission on scripts"
+    - "script execution methods"
+    - "comments"
+  example_commands_or_scenarios:
+    - "#!/usr/bin/env bash            # portable shebang line"
+    - "chmod +x hello.sh && ./hello.sh  # make executable and run"
+    - "bash hello.sh                 # run without execute permission via bash interpreter"
+    - "Scenario: Writing a 5-line script that prints a greeting and the current date"
+  prerequisites:
+    - L25
+
+- lesson_id: L27
+  module_id: 9
+  title: "Variables and Conditionals"
+  learning_objectives:
+    - "Declare and use variables in a Bash script, including reading user input with read"
+    - "Write if/elif/else conditionals using test expressions for strings, numbers, and files"
+    - "Explain the difference between [ ] and [[ ]] test syntax"
+  key_concepts:
+    - "bash variables"
+    - "variable expansion"
+    - "if/elif/else"
+    - "test expressions"
+    - "read command"
+  example_commands_or_scenarios:
+    - "name='Linux'; echo \"Hello, $name\"  # declare and expand a variable"
+    - "read -p 'Enter your name: ' user_name  # read user input into a variable"
+    - "if [[ -f /etc/passwd ]]; then echo 'exists'; fi  # test if a file exists"
+    - "if [[ $1 -gt 10 ]]; then echo 'big'; else echo 'small'; fi  # numeric comparison"
+  prerequisites:
+    - L26
+
+- lesson_id: L28
+  module_id: 9
+  title: "Loops in Bash"
+  learning_objectives:
+    - "Write for loops to iterate over a list of items and over a numeric range"
+    - "Write while loops that continue until a condition changes"
+    - "Use break and continue to control loop execution"
+  key_concepts:
+    - "for loop"
+    - "while loop"
+    - "loop control (break/continue)"
+    - "seq command"
+    - "iterating over files"
+  example_commands_or_scenarios:
+    - "for i in 1 2 3; do echo $i; done  # simple for loop over a list"
+    - "for f in /var/log/*.log; do echo \"$f\"; done  # iterate over files with glob"
+    - "while [[ $count -lt 5 ]]; do echo $count; ((count++)); done  # while loop with counter"
+    - "for i in $(seq 1 10); do [[ $i -eq 5 ]] && continue; echo $i; done  # skip 5 with continue"
+  prerequisites:
+    - L27
+
+- lesson_id: L29
+  module_id: 9
+  title: "Functions and Task Automation"
+  learning_objectives:
+    - "Define and call functions in a Bash script, passing arguments and capturing return values"
+    - "Write a script that automates a multi-step system task (e.g. backup, log rotation)"
+    - "Explain how to schedule a script with cron using crontab -e"
+  key_concepts:
+    - "bash functions"
+    - "function arguments ($1, $2)"
+    - "local variables"
+    - "cron and crontab"
+    - "task automation"
+  example_commands_or_scenarios:
+    - "greet() { local name=$1; echo \"Hello, $name!\"; }; greet Linux  # define and call a function"
+    - "Scenario: A backup script that tarballs ~/projects, timestamps the archive, and moves it to /backups"
+    - "crontab -e                    # open the cron job editor"
+    - "0 2 * * * /home/alice/backup.sh  # schedule a script to run daily at 02:00"
+  prerequisites:
+    - L28
