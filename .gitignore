@@ -40,7 +40,8 @@ venv/
 dist/
 .pytest_cache/
 
-# Generated content / embeddings
+# Generated content / embeddings (runtime pipeline dirs — gitignored, created at runtime)
+courses/*/pipeline/
 content/generated/
 content/embeddings/
 content/*.jsonl
