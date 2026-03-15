@@ -117,7 +117,7 @@ Practical split:
 - [ ] Human review: validate all quiz questions for correctness and appropriate difficulty per tier
 - [ ] Ensure every question has `answer`, `options[]` (where applicable), and `explanation` fields populated — no `accept_variants` or free-text input fields (all formats are tap-to-select)
 
-### 1.4 Database Loading
+### 1.5 Database Loading
 > **Note:** Before starting this phase, check Claude memory file `project_phase14_db_seeding.md` — VPC connector and Cloud Run Job infrastructure must be in place before any seeding scripts can run. See also Phase 3.2 (VPC connector) which may need to be pulled forward.
 
 - [ ] Run Cloud SQL schema migrations to create `lessons`, `content_chunks`, and `quiz_questions` tables
