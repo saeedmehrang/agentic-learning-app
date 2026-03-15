@@ -75,26 +75,47 @@ Practical split:
 > **Goal:** All 29 lessons written, tiered, embedded, and loaded into Cloud SQL. The knowledge base must be complete before agents can be meaningfully tested end-to-end.
 
 ### 1.1 Course Structure & Lesson Outlines
-- [ ] Finalise the course structure for all 9 modules (29 lessons including the Shell Scripting module)
-- [ ] Write a lesson outline for each of the 29 lessons: 2–3 learning objectives + example commands/scenarios
-- [ ] Define the prerequisite graph: `prerequisites[]` array per lesson — map all prerequisite edges for the Linux basics course
+- [x] Finalise the course structure for all 9 modules (29 lessons including the Shell Scripting module)
+- [x] Write a lesson outline for each of the 29 lessons: learning objectives, key concepts, example commands/scenarios — committed to `content/outlines/linux_basics_outlines.yaml`
+- [x] Define the prerequisite graph: `prerequisites[]` array per lesson — all prerequisite edges mapped in the outlines YAML
 - [ ] Assign `concept_tags[]` per lesson (these drive FSRS mastery tracking per concept, not per lesson)
 
-### 1.2 Content Generation Pipeline
-- [ ] Write a Python content generation script that:
-  - Takes a lesson outline as input
-  - Calls Gemini 3 Flash to generate 3 difficulty tier variants (Beginner / Intermediate / Advanced) per lesson
-  - Outputs structured JSON per content chunk
-- [ ] Run content generation for all 29 lessons × 3 tiers = 87 content chunks
-- [ ] Human review: read and approve all generated content — flag any lessons needing regeneration or manual edits
-- [ ] Embed all approved content chunks using Vertex AI `text-embedding-005` (768-dim vectors)
+### 1.2 Course Concept Map *(required for every new course — do this before generation)*
 
-### 1.3 Quiz Question Generation
-- [ ] Extend the content pipeline script to generate quiz questions per lesson per tier:
-  - 3 questions per format (Multiple Choice, True/False, Fill-in-the-blank, Command Completion)
-  - Up to 12 questions per lesson per tier = up to 348 questions total across the course
+> **What it is:** A JSON file (`content/{course_id}_concept_map.json`) that gives the content generation pipeline a bird's-eye view of the whole course. Without it, Gemini writes each lesson in isolation and may re-explain already-covered concepts, introduce concepts ahead of schedule, or miss cross-lesson connections.
+>
+> **What it contains:**
+> - `lessons`: for each lesson — which concepts it **introduces** (first time a concept is taught) vs which it **assumes** (concepts introduced in earlier lessons that can be referenced without re-teaching)
+> - `concept_index`: a reverse map from concept name → the lesson that first introduces it — used by the generation script to resolve prerequisite context without passing the full outline
+> - `course_metadata`: total lesson count, module structure, and tier definitions
+>
+> **How it is generated:** Run Claude Code (Sonnet) over the completed outlines YAML once, before any Gemini generation calls. The output is committed to the repo alongside the outlines and treated as a stable artifact — only regenerate if the outlines change significantly. See `content/linux_basics_concept_map.json` as the reference example.
+>
+> **Why this matters for quality:** The generation script uses the concept map to build a compact per-lesson context (~40 lines) — the target lesson block plus one-line summaries of prerequisite concepts. This prevents Gemini's context window from being filled with irrelevant lessons while still giving it the cross-lesson awareness needed to write coherent, non-repetitive content.
+
+- [ ] Generate `content/linux_basics_concept_map.json` using Claude Code (Sonnet) from the completed outlines YAML
+- [ ] Human review: confirm concept introduction order is correct and no concept is listed as assumed before it is introduced
+- [ ] **For every future course:** repeat this step — generate `content/{course_id}_concept_map.json` before running any content generation
+
+### 1.3 Content Generation Pipeline
+- [x] Write prompt templates for lesson and quiz generation — committed to `content/prompts/`
+  - `content/prompts/lesson_generation.md` — 3-tier lesson prompt with `terminal_steps` schema
+  - `content/prompts/quiz_generation.md` — 4-format quiz prompt, all tap-to-select
+- [ ] Write `content/generate_content.py`:
+  - Reads `content/outlines/linux_basics_outlines.yaml` and `content/linux_basics_concept_map.json`
+  - Builds a compact per-lesson context (lesson block + prereq concept summaries from the map)
+  - Calls Gemini 3 Flash for each lesson × tier combination (87 lesson calls + 87 quiz calls = 174 total)
+  - Default quiz parameters: 8 questions per lesson per tier, all 4 formats
+  - Writes structured JSON output to `content/generated/`
+- [ ] Run content generation for all 29 lessons × 3 tiers = 87 content chunks + 87 quiz sets
+- [ ] Human review: read and approve all generated content — flag any lessons needing regeneration or manual edits
+- [ ] Embed all approved content chunks using Vertex AI `text-embedding-004` (768-dim vectors)
+
+### 1.4 Quiz Question Generation
+> Quiz generation is integrated into `generate_content.py` (see 1.3) — not a separate script. Each Gemini call produces both the lesson content and the quiz questions for that lesson × tier in a single pass.
+
 - [ ] Human review: validate all quiz questions for correctness and appropriate difficulty per tier
-- [ ] Ensure every question has `correct_answer`, `distractors[]`, and `explanation` fields populated
+- [ ] Ensure every question has `answer`, `options[]` (where applicable), and `explanation` fields populated — no `accept_variants` or free-text input fields (all formats are tap-to-select)
 
 ### 1.4 Database Loading
 > **Note:** Before starting this phase, check Claude memory file `project_phase14_db_seeding.md` — VPC connector and Cloud Run Job infrastructure must be in place before any seeding scripts can run. See also Phase 3.2 (VPC connector) which may need to be pulled forward.

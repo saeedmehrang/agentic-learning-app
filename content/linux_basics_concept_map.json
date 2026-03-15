@@ -1,0 +1,683 @@
+{
+  "course_id": "linux_basics",
+  "course_title": "Linux Basics",
+  "generated_by": "Claude Sonnet 4.6",
+  "generated_at": "2026-03-15",
+  "course_metadata": {
+    "total_lessons": 29,
+    "total_modules": 9,
+    "tiers": ["Beginner", "Intermediate", "Advanced"],
+    "modules": {
+      "1": { "title": "Linux Foundations", "lessons": ["L01", "L02", "L03"] },
+      "2": { "title": "The Command Line", "lessons": ["L04", "L05", "L06", "L07"] },
+      "3": { "title": "The Filesystem", "lessons": ["L08", "L09", "L10", "L11"] },
+      "4": { "title": "Working with Files", "lessons": ["L12", "L13", "L14"] },
+      "5": { "title": "Users and Permissions", "lessons": ["L15", "L16", "L17"] },
+      "6": { "title": "Processes and Services", "lessons": ["L18", "L19", "L20"] },
+      "7": { "title": "Networking Basics", "lessons": ["L21", "L22", "L23"] },
+      "8": { "title": "Package Management", "lessons": ["L24", "L25"] },
+      "9": { "title": "Shell Scripting", "lessons": ["L26", "L27", "L28", "L29"] }
+    }
+  },
+  "lessons": {
+    "L01": {
+      "title": "The History of Linux",
+      "introduces": [
+        "Unix heritage",
+        "Linus Torvalds",
+        "open source movement",
+        "Linux kernel v1.0",
+        "GNU project"
+      ],
+      "assumes": [],
+      "generation_note": "No prerequisites — use plain analogies. This is the learner's first contact with Linux concepts. Introduce 'kernel' at a very high level only; do not define system calls or userland here."
+    },
+    "L02": {
+      "title": "Linux Distributions",
+      "introduces": [
+        "Linux distribution",
+        "package manager",
+        "Ubuntu",
+        "Debian",
+        "rolling vs stable release"
+      ],
+      "assumes": [
+        { "concept": "Linux kernel v1.0", "introduced_in": "L01" },
+        { "concept": "open source movement", "introduced_in": "L01" }
+      ],
+      "generation_note": "The learner knows Linux exists and has a kernel. Explain that a distro bundles the kernel with software. Do not explain what a package manager does in depth — that is introduced here for the first time and should be kept high-level."
+    },
+    "L03": {
+      "title": "Kernel, OS, and Open Source",
+      "introduces": [
+        "Linux kernel (in depth)",
+        "userland",
+        "GNU GPL",
+        "open source licence",
+        "system call interface"
+      ],
+      "assumes": [
+        { "concept": "Unix heritage", "introduced_in": "L01" },
+        { "concept": "GNU project", "introduced_in": "L01" },
+        { "concept": "open source movement", "introduced_in": "L01" },
+        { "concept": "Linux distribution", "introduced_in": "L02" },
+        { "concept": "package manager", "introduced_in": "L02" }
+      ],
+      "generation_note": "This lesson goes deeper on concepts first named in L01/L02. The layered model (hardware → kernel → libraries → shell → apps) is introduced here for the first time — do not assume learners already know it. The system call interface is new; define it concretely."
+    },
+    "L04": {
+      "title": "The Shell and the Terminal",
+      "introduces": [
+        "terminal emulator",
+        "shell",
+        "Bash",
+        "prompt",
+        "stdin/stdout/stderr"
+      ],
+      "assumes": [
+        { "concept": "Linux kernel (in depth)", "introduced_in": "L03" },
+        { "concept": "userland", "introduced_in": "L03" },
+        { "concept": "system call interface", "introduced_in": "L03" },
+        { "concept": "Linux distribution", "introduced_in": "L02" }
+      ],
+      "generation_note": "The shell and terminal are introduced here for the first time. Learners understand the kernel exists and sits below userland. Draw the connection: the shell is a userland program that talks to the kernel via system calls. stdin/stdout/stderr are new — introduce them conceptually; redirection is not covered until L07."
+    },
+    "L05": {
+      "title": "Command Syntax and Structure",
+      "introduces": [
+        "command syntax",
+        "flags and options",
+        "arguments",
+        "command chaining with semicolons",
+        "exit codes"
+      ],
+      "assumes": [
+        { "concept": "shell", "introduced_in": "L04" },
+        { "concept": "Bash", "introduced_in": "L04" },
+        { "concept": "prompt", "introduced_in": "L04" },
+        { "concept": "stdin/stdout/stderr", "introduced_in": "L04" }
+      ],
+      "generation_note": "Learners have run their first commands (echo, bash --version) but have not studied command structure formally. This lesson gives them the mental model: command + options + arguments. Semicolon chaining is introduced here; pipes are NOT — those come in L07. Do not sneak in pipes."
+    },
+    "L06": {
+      "title": "Getting Help with Man Pages",
+      "introduces": [
+        "man pages",
+        "manual sections",
+        "SYNOPSIS notation",
+        "--help flag",
+        "info command"
+      ],
+      "assumes": [
+        { "concept": "command syntax", "introduced_in": "L05" },
+        { "concept": "flags and options", "introduced_in": "L05" },
+        { "concept": "arguments", "introduced_in": "L05" }
+      ],
+      "generation_note": "Learners can now read a command's syntax but do not yet know how to look things up themselves. Teach man pages as the primary self-help tool. SYNOPSIS notation (brackets for optional, pipes for alternatives) is new — explain it explicitly. The less pager is used inside man but is not yet formally introduced (L12); mention 'q to quit' without a deep dive."
+    },
+    "L07": {
+      "title": "Pipes, Redirection, and Bash Productivity",
+      "introduces": [
+        "pipe operator",
+        "stdout redirection (> and >>)",
+        "stderr redirection (2>)",
+        "Tab completion",
+        "command history"
+      ],
+      "assumes": [
+        { "concept": "stdin/stdout/stderr", "introduced_in": "L04" },
+        { "concept": "command syntax", "introduced_in": "L05" },
+        { "concept": "flags and options", "introduced_in": "L05" },
+        { "concept": "command chaining with semicolons", "introduced_in": "L05" },
+        { "concept": "man pages", "introduced_in": "L06" }
+      ],
+      "generation_note": "stdin/stdout/stderr were introduced conceptually in L04 — now make them concrete through redirection. The pipe operator is brand new and is the conceptual centrepiece of this lesson. Semicolon chaining from L05 provides a contrast: pipes send output forward, semicolons just sequence. Ctrl+R and Tab completion are also new here."
+    },
+    "L08": {
+      "title": "The Linux Filesystem Hierarchy",
+      "introduces": [
+        "Filesystem Hierarchy Standard",
+        "absolute path",
+        "relative path",
+        "root directory /",
+        "mount points"
+      ],
+      "assumes": [
+        { "concept": "pipe operator", "introduced_in": "L07" },
+        { "concept": "stdout redirection (> and >>)", "introduced_in": "L07" },
+        { "concept": "userland", "introduced_in": "L03" },
+        { "concept": "Linux distribution", "introduced_in": "L02" }
+      ],
+      "generation_note": "This is the learner's first dedicated filesystem lesson. Absolute and relative paths are new concepts — define them carefully with the /home/alice/docs vs docs example. Mount points are new; keep the explanation high-level (a directory that acts as an attachment point for a device). The learner will navigate the filesystem in L09 — this lesson is conceptual groundwork."
+    },
+    "L09": {
+      "title": "Navigating the Filesystem: pwd, ls, and cd",
+      "introduces": [
+        "working directory",
+        "pwd",
+        "ls options",
+        "cd navigation",
+        "hidden files"
+      ],
+      "assumes": [
+        { "concept": "Filesystem Hierarchy Standard", "introduced_in": "L08" },
+        { "concept": "absolute path", "introduced_in": "L08" },
+        { "concept": "relative path", "introduced_in": "L08" },
+        { "concept": "root directory /", "introduced_in": "L08" },
+        { "concept": "command syntax", "introduced_in": "L05" },
+        { "concept": "flags and options", "introduced_in": "L05" }
+      ],
+      "generation_note": "Learners know what the filesystem looks like (L08) but have not yet navigated it with commands. pwd, ls, and cd are the core trio. Hidden files (dot-prefixed) are introduced here via ls -a. The -l flag output (permissions, owner, size) should be mentioned but not fully explained — permissions get their own lesson in L11."
+    },
+    "L10": {
+      "title": "Creating and Removing Files and Directories",
+      "introduces": [
+        "mkdir",
+        "touch",
+        "rm and rm -rf",
+        "rmdir",
+        "inode"
+      ],
+      "assumes": [
+        { "concept": "working directory", "introduced_in": "L09" },
+        { "concept": "absolute path", "introduced_in": "L08" },
+        { "concept": "relative path", "introduced_in": "L08" },
+        { "concept": "cd navigation", "introduced_in": "L09" },
+        { "concept": "ls options", "introduced_in": "L09" }
+      ],
+      "generation_note": "Learners can now navigate; now they create and destroy. The inode concept is introduced here — keep it brief (a filesystem record that stores file metadata). The danger of rm -rf is a key teaching moment; be explicit and memorable. mkdir -p for nested creation is important and should be in terminal_steps."
+    },
+    "L11": {
+      "title": "File Permissions Overview",
+      "introduces": [
+        "permission string",
+        "owner / group / other",
+        "read write execute",
+        "octal notation",
+        "ls -l output"
+      ],
+      "assumes": [
+        { "concept": "inode", "introduced_in": "L10" },
+        { "concept": "ls options", "introduced_in": "L09" },
+        { "concept": "working directory", "introduced_in": "L09" },
+        { "concept": "root user", "introduced_in": "L15" }
+      ],
+      "generation_note": "IMPORTANT: 'root user' has NOT been introduced yet at this point in the course (L15 comes later). For Beginner tier, describe the owner as 'the user who created the file' without using the term 'root user'. For Advanced tier, a brief forward-reference to root is acceptable. Octal notation (755, 644) is introduced here — do not assume learners know it. chmod and chown are NOT covered here; they come in L16.",
+      "cross_lesson_flag": "root_user_not_yet_introduced"
+    },
+    "L12": {
+      "title": "Viewing File Contents: cat, less, head, and tail",
+      "introduces": [
+        "cat",
+        "less pager",
+        "head and tail",
+        "tail -f live follow",
+        "stdout redirection (cat usage)"
+      ],
+      "assumes": [
+        { "concept": "working directory", "introduced_in": "L09" },
+        { "concept": "absolute path", "introduced_in": "L08" },
+        { "concept": "stdout redirection (> and >>)", "introduced_in": "L07" },
+        { "concept": "pipe operator", "introduced_in": "L07" },
+        { "concept": "ls options", "introduced_in": "L09" }
+      ],
+      "generation_note": "The less pager was briefly touched in L06 (man pages use it) but is formally introduced here. cat + pipe is a natural combination — use it in examples. tail -f is a powerful concept for log monitoring; make it concrete with /var/log/syslog. Do not introduce grep or awk — those are not in scope for this course."
+    },
+    "L13": {
+      "title": "Editing Files with nano",
+      "introduces": [
+        "nano editor",
+        "Ctrl shortcuts",
+        "write-out (save)",
+        "search and replace in nano",
+        "text editor alternatives (vim, gedit)"
+      ],
+      "assumes": [
+        { "concept": "working directory", "introduced_in": "L09" },
+        { "concept": "absolute path", "introduced_in": "L08" },
+        { "concept": "cat", "introduced_in": "L12" },
+        { "concept": "stdout redirection (> and >>)", "introduced_in": "L07" }
+      ],
+      "generation_note": "nano is the first interactive editor introduced. The Ctrl+O / Ctrl+X / Ctrl+W / Ctrl+\\ shortcuts are all new. Mention vim and gedit briefly as alternatives — do not teach them. The simulated terminal cannot replicate a full TUI editor; terminal_steps here should cover running nano and the key shortcuts conceptually, or use echo/cat to demonstrate file editing effects."
+    },
+    "L14": {
+      "title": "Copying, Moving, and Wildcards",
+      "introduces": [
+        "cp",
+        "mv",
+        "wildcards",
+        "glob patterns",
+        "cp -r recursive copy"
+      ],
+      "assumes": [
+        { "concept": "working directory", "introduced_in": "L09" },
+        { "concept": "absolute path", "introduced_in": "L08" },
+        { "concept": "relative path", "introduced_in": "L08" },
+        { "concept": "mkdir", "introduced_in": "L10" },
+        { "concept": "touch", "introduced_in": "L10" },
+        { "concept": "rm and rm -rf", "introduced_in": "L10" },
+        { "concept": "ls options", "introduced_in": "L09" }
+      ],
+      "generation_note": "cp and mv are new. Wildcards (* and ?) are introduced here — connect them to the glob patterns concept. The shell expands globs before passing arguments to the command; make this explicit at Intermediate/Advanced tiers. cp -r for directories mirrors the mkdir -p concept from L10."
+    },
+    "L15": {
+      "title": "Users and Groups",
+      "introduces": [
+        "root user",
+        "UID and GID",
+        "groups",
+        "/etc/passwd",
+        "/etc/group"
+      ],
+      "assumes": [
+        { "concept": "Linux distribution", "introduced_in": "L02" },
+        { "concept": "userland", "introduced_in": "L03" },
+        { "concept": "absolute path", "introduced_in": "L08" },
+        { "concept": "cat", "introduced_in": "L12" },
+        { "concept": "ls -l output", "introduced_in": "L11" }
+      ],
+      "generation_note": "Root user is formally introduced here for the first time. L11 avoided it; now define it clearly. UID 0 = root. /etc/passwd format (7 colon-separated fields) should be walked through explicitly — learners may have seen it in L12's cat examples but not understood it. sudo and chmod are NOT covered here; they come in L16 and L17."
+    },
+    "L16": {
+      "title": "Changing Permissions with chmod and chown",
+      "introduces": [
+        "chmod",
+        "symbolic notation",
+        "chown",
+        "execute bit"
+      ],
+      "assumes": [
+        { "concept": "permission string", "introduced_in": "L11" },
+        { "concept": "owner / group / other", "introduced_in": "L11" },
+        { "concept": "read write execute", "introduced_in": "L11" },
+        { "concept": "octal notation", "introduced_in": "L11" },
+        { "concept": "root user", "introduced_in": "L15" },
+        { "concept": "UID and GID", "introduced_in": "L15" },
+        { "concept": "groups", "introduced_in": "L15" }
+      ],
+      "generation_note": "L11 taught how to read permissions; this lesson teaches how to change them. Both symbolic (u+x, g-w, o=r) and octal (755, 644) forms of chmod are introduced here — contrast them clearly. The execute bit on scripts is a key concept that links forward to L26 (shell scripting). chown requires root/sudo — mention that sudo is the mechanism but do not teach it here; L17 covers sudo."
+    },
+    "L17": {
+      "title": "sudo, su, and Managing Passwords",
+      "introduces": [
+        "sudo",
+        "sudoers file",
+        "su",
+        "passwd command",
+        "/etc/shadow"
+      ],
+      "assumes": [
+        { "concept": "root user", "introduced_in": "L15" },
+        { "concept": "UID and GID", "introduced_in": "L15" },
+        { "concept": "groups", "introduced_in": "L15" },
+        { "concept": "chmod", "introduced_in": "L16" },
+        { "concept": "chown", "introduced_in": "L16" },
+        { "concept": "/etc/passwd", "introduced_in": "L15" }
+      ],
+      "generation_note": "sudo is the capstone of the users/permissions module. The key insight: sudo is safer than logging in as root because it is audited and scoped. /etc/shadow is new — contrast it with /etc/passwd (hashes live in shadow, not passwd). su - (login shell) vs su (subshell) distinction is important for Advanced tier."
+    },
+    "L18": {
+      "title": "Viewing Processes: ps and top",
+      "introduces": [
+        "process",
+        "PID",
+        "ps aux",
+        "top",
+        "CPU and memory usage"
+      ],
+      "assumes": [
+        { "concept": "sudo", "introduced_in": "L17" },
+        { "concept": "pipe operator", "introduced_in": "L07" },
+        { "concept": "stdin/stdout/stderr", "introduced_in": "L04" },
+        { "concept": "command syntax", "introduced_in": "L05" }
+      ],
+      "generation_note": "Process and PID are new concepts. Connect PID to the earlier system call interface concept (L03) at Advanced tier — the kernel assigns PIDs. ps aux output columns (USER, PID, %CPU, %MEM, STAT, CMD) should be walked through one by one at Beginner tier. top's interactive keys (q to quit, k to kill) can be mentioned but keep focus on reading the output."
+    },
+    "L19": {
+      "title": "Killing Processes and Job Control",
+      "introduces": [
+        "kill signals",
+        "SIGTERM and SIGKILL",
+        "background jobs",
+        "jobs built-in",
+        "fg and bg"
+      ],
+      "assumes": [
+        { "concept": "process", "introduced_in": "L18" },
+        { "concept": "PID", "introduced_in": "L18" },
+        { "concept": "ps aux", "introduced_in": "L18" },
+        { "concept": "stdin/stdout/stderr", "introduced_in": "L04" }
+      ],
+      "generation_note": "Kill signals are new — explain SIGTERM (graceful) vs SIGKILL (forceful) clearly. The & operator for backgrounding is introduced here; do not confuse it with the && logical AND operator which is in scope only for scripting (L27). Ctrl+Z to suspend, then bg to resume, is an important workflow — make it a terminal_step sequence."
+    },
+    "L20": {
+      "title": "systemd Basics: Services and Boot",
+      "introduces": [
+        "systemd",
+        "unit files",
+        "systemctl",
+        "service lifecycle",
+        "PID 1"
+      ],
+      "assumes": [
+        { "concept": "process", "introduced_in": "L18" },
+        { "concept": "PID", "introduced_in": "L18" },
+        { "concept": "sudo", "introduced_in": "L17" },
+        { "concept": "Linux kernel (in depth)", "introduced_in": "L03" },
+        { "concept": "background jobs", "introduced_in": "L19" }
+      ],
+      "generation_note": "PID 1 is a new concept — explain it as the first process the kernel spawns after boot; all other processes descend from it. Unit files are new; a brief look at a .service file structure (ExecStart, Restart, WantedBy) is appropriate at Intermediate/Advanced. journalctl for log viewing can be introduced here as it is systemd-native."
+    },
+    "L21": {
+      "title": "Testing Connectivity: ping, curl, and wget",
+      "introduces": [
+        "ping",
+        "ICMP",
+        "curl",
+        "wget",
+        "HTTP request/response"
+      ],
+      "assumes": [
+        { "concept": "sudo", "introduced_in": "L17" },
+        { "concept": "stdout redirection (> and >>)", "introduced_in": "L07" },
+        { "concept": "flags and options", "introduced_in": "L05" },
+        { "concept": "absolute path", "introduced_in": "L08" }
+      ],
+      "generation_note": "ICMP and HTTP request/response are new networking concepts. Keep ICMP explanation simple: ping sends a small packet and waits for a reply. HTTP response codes (200, 404) can be introduced in the context of curl -I output. wget vs curl distinction: wget is download-focused, curl is inspect-and-transfer-focused."
+    },
+    "L22": {
+      "title": "Remote Access with SSH",
+      "introduces": [
+        "SSH protocol",
+        "key-based authentication",
+        "ssh-keygen",
+        "authorized_keys",
+        "scp"
+      ],
+      "assumes": [
+        { "concept": "ping", "introduced_in": "L21" },
+        { "concept": "IP address", "introduced_in": "L23" },
+        { "concept": "absolute path", "introduced_in": "L08" },
+        { "concept": "sudo", "introduced_in": "L17" }
+      ],
+      "generation_note": "NOTE: IP address is formally introduced in L23 (after L22 in the course sequence). For L22, you may reference 'the remote machine's address' and use an example IP (192.168.1.10) without formally defining subnets or routing. Key-based auth (public/private key pair) should be explained with an analogy: public key is the lock, private key is the key. ~/.ssh/authorized_keys location is new.",
+      "cross_lesson_flag": "ip_address_used_before_formal_introduction_in_L23"
+    },
+    "L23": {
+      "title": "IP Basics and /etc/hosts",
+      "introduces": [
+        "IP address",
+        "network interface",
+        "ip addr",
+        "/etc/hosts",
+        "DNS vs hosts file"
+      ],
+      "assumes": [
+        { "concept": "SSH protocol", "introduced_in": "L22" },
+        { "concept": "ping", "introduced_in": "L21" },
+        { "concept": "curl", "introduced_in": "L21" },
+        { "concept": "sudo", "introduced_in": "L17" },
+        { "concept": "absolute path", "introduced_in": "L08" }
+      ],
+      "generation_note": "IP address and network interface are formally defined here. The DNS vs /etc/hosts distinction is new — explain resolution order (hosts file checked before DNS). Editing /etc/hosts requires sudo (already known). ip addr output has many fields; focus on the inet line showing the IPv4 address."
+    },
+    "L24": {
+      "title": "Installing Software with apt",
+      "introduces": [
+        "apt",
+        "package repository",
+        "package index",
+        "apt install / remove",
+        "sources.list"
+      ],
+      "assumes": [
+        { "concept": "package manager", "introduced_in": "L02" },
+        { "concept": "sudo", "introduced_in": "L17" },
+        { "concept": "Linux distribution", "introduced_in": "L02" },
+        { "concept": "Debian", "introduced_in": "L02" },
+        { "concept": "Ubuntu", "introduced_in": "L02" },
+        { "concept": "absolute path", "introduced_in": "L08" }
+      ],
+      "generation_note": "Package manager was introduced conceptually in L02; now it becomes hands-on with apt. sources.list is new — explain it as the list of repositories apt checks. The update/upgrade distinction is important: apt update refreshes the index, apt upgrade installs newer versions. apt autoremove cleans up orphaned dependencies."
+    },
+    "L25": {
+      "title": "dpkg and System Updates",
+      "introduces": [
+        "dpkg",
+        ".deb package",
+        "apt vs dpkg",
+        "full-upgrade",
+        "package dependencies"
+      ],
+      "assumes": [
+        { "concept": "apt", "introduced_in": "L24" },
+        { "concept": "package repository", "introduced_in": "L24" },
+        { "concept": "package index", "introduced_in": "L24" },
+        { "concept": "sudo", "introduced_in": "L17" },
+        { "concept": "absolute path", "introduced_in": "L08" }
+      ],
+      "generation_note": "dpkg is the lower-level tool that apt wraps. The key distinction: dpkg works on local .deb files and does not resolve dependencies; apt resolves dependencies automatically. full-upgrade vs upgrade: full-upgrade may remove packages to resolve conflicts, upgrade never does. Package dependencies are new as a concept — explain with an analogy (an app that requires a library)."
+    },
+    "L26": {
+      "title": "Shebang and Script Structure",
+      "introduces": [
+        "shebang (#!)",
+        "bash script structure",
+        "execute permission on scripts",
+        "script execution methods",
+        "comments"
+      ],
+      "assumes": [
+        { "concept": "Bash", "introduced_in": "L04" },
+        { "concept": "chmod", "introduced_in": "L16" },
+        { "concept": "execute bit", "introduced_in": "L16" },
+        { "concept": "absolute path", "introduced_in": "L08" },
+        { "concept": "stdout redirection (> and >>)", "introduced_in": "L07" },
+        { "concept": "apt", "introduced_in": "L24" }
+      ],
+      "generation_note": "The shebang is new. Explain #!/usr/bin/env bash as more portable than #!/bin/bash — the env lookup is key. ./script.sh vs bash script.sh: the former requires execute permission (chmod +x), the latter does not — this is a practical and memorable contrast. Comments (#) are new in the scripting context."
+    },
+    "L27": {
+      "title": "Variables and Conditionals",
+      "introduces": [
+        "bash variables",
+        "variable expansion",
+        "if/elif/else",
+        "test expressions",
+        "read command"
+      ],
+      "assumes": [
+        { "concept": "shebang (#!)", "introduced_in": "L26" },
+        { "concept": "bash script structure", "introduced_in": "L26" },
+        { "concept": "execute permission on scripts", "introduced_in": "L26" },
+        { "concept": "stdin/stdout/stderr", "introduced_in": "L04" },
+        { "concept": "exit codes", "introduced_in": "L05" }
+      ],
+      "generation_note": "Variable expansion ($name, ${name}) is new — explain the quoting rules: double quotes allow expansion, single quotes do not. The [ ] vs [[ ]] distinction is important: [[ ]] is Bash-specific and more robust; prefer it. The read command connects to stdin (introduced in L04). Exit codes from L05 connect to the if/elif pattern — $? can be tested."
+    },
+    "L28": {
+      "title": "Loops in Bash",
+      "introduces": [
+        "for loop",
+        "while loop",
+        "loop control (break/continue)",
+        "seq command",
+        "iterating over files"
+      ],
+      "assumes": [
+        { "concept": "bash variables", "introduced_in": "L27" },
+        { "concept": "variable expansion", "introduced_in": "L27" },
+        { "concept": "if/elif/else", "introduced_in": "L27" },
+        { "concept": "test expressions", "introduced_in": "L27" },
+        { "concept": "glob patterns", "introduced_in": "L14" },
+        { "concept": "exit codes", "introduced_in": "L05" }
+      ],
+      "generation_note": "for and while are both new. seq is introduced here for numeric ranges. Iterating over files with glob patterns (for f in /var/log/*.log) connects back to wildcards from L14. break and continue are new control flow concepts — contrast them with if/elif from L27. The arithmetic counter ((count++)) syntax can be introduced at Intermediate/Advanced."
+    },
+    "L29": {
+      "title": "Functions and Task Automation",
+      "introduces": [
+        "bash functions",
+        "function arguments ($1, $2)",
+        "local variables",
+        "cron and crontab",
+        "task automation"
+      ],
+      "assumes": [
+        { "concept": "bash variables", "introduced_in": "L27" },
+        { "concept": "if/elif/else", "introduced_in": "L27" },
+        { "concept": "for loop", "introduced_in": "L28" },
+        { "concept": "while loop", "introduced_in": "L28" },
+        { "concept": "execute permission on scripts", "introduced_in": "L26" },
+        { "concept": "sudo", "introduced_in": "L17" },
+        { "concept": "absolute path", "introduced_in": "L08" }
+      ],
+      "generation_note": "Functions are new — explain that $1, $2 inside a function refer to the function's arguments, not the script's. local keyword prevents variable leakage; contrast with unscoped variables from L27. cron is new and is the capstone practical skill of the course — walk through crontab -e and the five-field cron expression (minute hour day month weekday) carefully. A realistic backup script is the ideal Advanced terminal_steps sequence."
+    }
+  },
+  "concept_index": {
+    "Unix heritage": "L01",
+    "Linus Torvalds": "L01",
+    "open source movement": "L01",
+    "Linux kernel v1.0": "L01",
+    "GNU project": "L01",
+    "Linux distribution": "L02",
+    "package manager": "L02",
+    "Ubuntu": "L02",
+    "Debian": "L02",
+    "rolling vs stable release": "L02",
+    "Linux kernel (in depth)": "L03",
+    "userland": "L03",
+    "GNU GPL": "L03",
+    "open source licence": "L03",
+    "system call interface": "L03",
+    "terminal emulator": "L04",
+    "shell": "L04",
+    "Bash": "L04",
+    "prompt": "L04",
+    "stdin/stdout/stderr": "L04",
+    "command syntax": "L05",
+    "flags and options": "L05",
+    "arguments": "L05",
+    "command chaining with semicolons": "L05",
+    "exit codes": "L05",
+    "man pages": "L06",
+    "manual sections": "L06",
+    "SYNOPSIS notation": "L06",
+    "--help flag": "L06",
+    "info command": "L06",
+    "pipe operator": "L07",
+    "stdout redirection (> and >>)": "L07",
+    "stderr redirection (2>)": "L07",
+    "Tab completion": "L07",
+    "command history": "L07",
+    "Filesystem Hierarchy Standard": "L08",
+    "absolute path": "L08",
+    "relative path": "L08",
+    "root directory /": "L08",
+    "mount points": "L08",
+    "working directory": "L09",
+    "pwd": "L09",
+    "ls options": "L09",
+    "cd navigation": "L09",
+    "hidden files": "L09",
+    "mkdir": "L10",
+    "touch": "L10",
+    "rm and rm -rf": "L10",
+    "rmdir": "L10",
+    "inode": "L10",
+    "permission string": "L11",
+    "owner / group / other": "L11",
+    "read write execute": "L11",
+    "octal notation": "L11",
+    "ls -l output": "L11",
+    "cat": "L12",
+    "less pager": "L12",
+    "head and tail": "L12",
+    "tail -f live follow": "L12",
+    "nano editor": "L13",
+    "Ctrl shortcuts": "L13",
+    "write-out (save)": "L13",
+    "search and replace in nano": "L13",
+    "text editor alternatives (vim, gedit)": "L13",
+    "cp": "L14",
+    "mv": "L14",
+    "wildcards": "L14",
+    "glob patterns": "L14",
+    "cp -r recursive copy": "L14",
+    "root user": "L15",
+    "UID and GID": "L15",
+    "groups": "L15",
+    "/etc/passwd": "L15",
+    "/etc/group": "L15",
+    "chmod": "L16",
+    "symbolic notation": "L16",
+    "chown": "L16",
+    "execute bit": "L16",
+    "sudo": "L17",
+    "sudoers file": "L17",
+    "su": "L17",
+    "passwd command": "L17",
+    "/etc/shadow": "L17",
+    "process": "L18",
+    "PID": "L18",
+    "ps aux": "L18",
+    "top": "L18",
+    "CPU and memory usage": "L18",
+    "kill signals": "L19",
+    "SIGTERM and SIGKILL": "L19",
+    "background jobs": "L19",
+    "jobs built-in": "L19",
+    "fg and bg": "L19",
+    "systemd": "L20",
+    "unit files": "L20",
+    "systemctl": "L20",
+    "service lifecycle": "L20",
+    "PID 1": "L20",
+    "ping": "L21",
+    "ICMP": "L21",
+    "curl": "L21",
+    "wget": "L21",
+    "HTTP request/response": "L21",
+    "SSH protocol": "L22",
+    "key-based authentication": "L22",
+    "ssh-keygen": "L22",
+    "authorized_keys": "L22",
+    "scp": "L22",
+    "IP address": "L23",
+    "network interface": "L23",
+    "ip addr": "L23",
+    "/etc/hosts": "L23",
+    "DNS vs hosts file": "L23",
+    "apt": "L24",
+    "package repository": "L24",
+    "package index": "L24",
+    "apt install / remove": "L24",
+    "sources.list": "L24",
+    "dpkg": "L25",
+    ".deb package": "L25",
+    "apt vs dpkg": "L25",
+    "full-upgrade": "L25",
+    "package dependencies": "L25",
+    "shebang (#!)": "L26",
+    "bash script structure": "L26",
+    "execute permission on scripts": "L26",
+    "script execution methods": "L26",
+    "comments": "L26",
+    "bash variables": "L27",
+    "variable expansion": "L27",
+    "if/elif/else": "L27",
+    "test expressions": "L27",
+    "read command": "L27",
+    "for loop": "L28",
+    "while loop": "L28",
+    "loop control (break/continue)": "L28",
+    "seq command": "L28",
+    "iterating over files": "L28",
+    "bash functions": "L29",
+    "function arguments ($1, $2)": "L29",
+    "local variables": "L29",
+    "cron and crontab": "L29",
+    "task automation": "L29"
+  }
+}
