@@ -78,11 +78,13 @@ python content-generation/generate_content.py [options]
 
 **Output:** Up to three files per combination:
 
-| Directory | File | Purpose |
-|---|---|---|
-| `pipeline/generated/` | `L##_[tier].json` | Raw Gemini output |
-| `pipeline/reviewed/` | `L##_[tier]_review.json` | Reviewer's structured feedback (audit trail) |
-| `pipeline/approved/` | `L##_[tier].json` | Final content — read by `embed_content.py` |
+| Path | Purpose |
+|---|---|
+| `pipeline/generated/{tier}/L##.json` | Raw Gemini output |
+| `pipeline/reviewed/{tier}/L##_review.json` | Reviewer's structured feedback (audit trail) |
+| `pipeline/approved/{tier}/L##.json` | Final content — read by `embed_content.py` |
+
+Where `{tier}` is one of `beginner`, `intermediate`, or `advanced`.
 
 On failure, a `.error` file is written alongside the expected `generated/` path with the error message and raw API response.
 
@@ -127,7 +129,7 @@ python content-generation/embed_content.py [options]
 | `--dry-run` | Print what would be embedded without calling the API |
 | `--resume` | Skip files already present in `pipeline/embedded/` |
 
-Reads from `pipeline/approved/`, writes to `pipeline/embedded/`.
+Reads from `pipeline/approved/{tier}/`, writes to `pipeline/embedded/{tier}/`.
 
 Each embedded file shape:
 ```json

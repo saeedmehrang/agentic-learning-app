@@ -344,9 +344,9 @@ async def generate_one(
     """
     lesson_id: str = lesson_outline["lesson_id"]
     tier_slug = TIER_FILENAME[tier]
-    generated_path = OUTPUT_DIR / f"{lesson_id}_{tier_slug}.json"
-    reviewed_path = REVIEWED_DIR / f"{lesson_id}_{tier_slug}_review.json"
-    approved_path = APPROVED_DIR / f"{lesson_id}_{tier_slug}.json"
+    generated_path = OUTPUT_DIR / tier_slug / f"{lesson_id}.json"
+    reviewed_path = REVIEWED_DIR / tier_slug / f"{lesson_id}_review.json"
+    approved_path = APPROVED_DIR / tier_slug / f"{lesson_id}.json"
     label = f"[{lesson_id} {tier}]"
 
     # Resume: skip if approved output already exists
@@ -355,7 +355,7 @@ async def generate_one(
         return lesson_id, tier, "skipped"
 
     if dry_run:
-        logger.info(f"{label} Would generate -> {approved_path.name}")
+        logger.info(f"{label} Would generate -> {tier_slug}/{approved_path.name}")
         return lesson_id, tier, "skipped"
 
     logger.info(f"{label} Generating...")
@@ -531,9 +531,10 @@ async def run_pipeline(
         model = None  # type: ignore[assignment]
         reviewer_model = None  # type: ignore[assignment]
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    REVIEWED_DIR.mkdir(parents=True, exist_ok=True)
-    APPROVED_DIR.mkdir(parents=True, exist_ok=True)
+    for tier_slug in TIER_FILENAME.values():
+        (OUTPUT_DIR / tier_slug).mkdir(parents=True, exist_ok=True)
+        (REVIEWED_DIR / tier_slug).mkdir(parents=True, exist_ok=True)
+        (APPROVED_DIR / tier_slug).mkdir(parents=True, exist_ok=True)
 
     semaphore = asyncio.Semaphore(settings.concurrency_limit)
 

@@ -2,9 +2,9 @@
 """
 embed_content.py — Embedding pipeline for approved Linux Basics lesson content.
 
-For each approved lesson × tier JSON in courses/linux-basics/pipeline/approved/,
+For each approved lesson × tier JSON in courses/linux-basics/pipeline/approved/{tier}/,
 calls Vertex AI text-embedding-005 to produce a 768-dim embedding of the lesson text,
-then writes an enriched JSON file to courses/linux-basics/pipeline/embedded/.
+then writes an enriched JSON file to courses/linux-basics/pipeline/embedded/{tier}/.
 
 The embedded JSON contains the lesson text, its embedding vector, and the raw quiz
 questions — everything seed_db.py needs to populate Cloud SQL.
@@ -151,17 +151,19 @@ async def embed_one(
     Returns (lesson_id, tier_slug, status) where status is one of:
     "embedded", "skipped", "failed".
     """
-    stem = file_path.stem  # e.g. "L04_beginner"
-    output_path = output_dir / file_path.name
-    label = f"[{stem}]"
+    # file_path is approved/{tier_slug}/{lesson_id}.json
+    tier_slug = file_path.parent.name
+    lesson_id_stem = file_path.stem  # e.g. "L04"
+    label = f"[{lesson_id_stem} {tier_slug}]"
+    output_path = output_dir / tier_slug / file_path.name
 
     if resume and output_path.exists():
         logger.info(f"{label} Skipped (already exists)")
-        return stem, "", "skipped"
+        return lesson_id_stem, tier_slug, "skipped"
 
     if dry_run:
-        logger.info(f"{label} Would embed -> {output_path.name}")
-        return stem, "", "skipped"
+        logger.info(f"{label} Would embed -> {tier_slug}/{file_path.name}")
+        return lesson_id_stem, tier_slug, "skipped"
 
     # Load approved JSON
     try:
@@ -169,18 +171,16 @@ async def embed_one(
             data: dict[str, Any] = json.load(f)
     except Exception as exc:
         logger.error(f"{label} FAILED: Could not read input — {exc}")
-        return stem, "", "failed"
+        return lesson_id_stem, tier_slug, "failed"
 
     lesson_obj = data.get("lesson", {})
     quiz_obj = data.get("quiz", {})
-    lesson_id: str = data.get("lesson_id", stem.split("_")[0].upper())
-    tier_raw: str = data.get("tier", "")
-    tier_slug = tier_raw.lower()
+    lesson_id: str = data.get("lesson_id", lesson_id_stem.upper())
 
     chunk_text = extract_chunk_text(lesson_obj)
     if not chunk_text.strip():
         logger.error(f"{label} FAILED: No extractable text from lesson")
-        return stem, tier_slug, "failed"
+        return lesson_id_stem, tier_slug, "failed"
 
     logger.info(f"{label} Embedding...")
     start = time.monotonic()
@@ -199,7 +199,7 @@ async def embed_one(
         except Exception as exc:
             elapsed = time.monotonic() - start
             logger.error(f"{label} FAILED ({elapsed:.1f}s): {exc}")
-            return stem, tier_slug, "failed"
+            return lesson_id_stem, tier_slug, "failed"
 
     elapsed = time.monotonic() - start
 
@@ -207,7 +207,7 @@ async def embed_one(
         logger.error(
             f"{label} FAILED ({elapsed:.1f}s): Expected 768-dim vector, got {len(vector)}"
         )
-        return stem, tier_slug, "failed"
+        return lesson_id_stem, tier_slug, "failed"
 
     output: dict[str, Any] = {
         "lesson_id": lesson_id,
@@ -225,16 +225,17 @@ async def embed_one(
         },
     }
 
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         with output_path.open("w", encoding="utf-8") as f:
             json.dump(output, f, indent=2, ensure_ascii=False)
     except OSError as exc:
         elapsed = time.monotonic() - start
         logger.error(f"{label} FAILED ({elapsed:.1f}s): Could not write output — {exc}")
-        return stem, tier_slug, "failed"
+        return lesson_id_stem, tier_slug, "failed"
 
     logger.info(f"{label} Done ({elapsed:.1f}s) — vector dim={len(vector)}")
-    return stem, tier_slug, "embedded"
+    return lesson_id_stem, tier_slug, "embedded"
 
 
 # ---------------------------------------------------------------------------
@@ -321,28 +322,25 @@ def parse_args() -> argparse.Namespace:
 def collect_approved_files(lesson_filter: str | None, tier_filter: str | None) -> list[Path]:
     """
     Return the list of approved JSON files to embed, applying lesson/tier filters.
-    Files are expected to follow the naming convention: {lesson_id}_{tier_slug}.json
+    Files are expected at: approved/{tier_slug}/{lesson_id}.json
     """
     if not APPROVED_DIR.exists():
         logger.error(
             f"Approved directory not found: {APPROVED_DIR}\n"
-            "Run generate_content.py first, then move approved files to pipeline/approved/."
+            "Run generate_content.py first to populate pipeline/approved/."
         )
         sys.exit(1)
 
-    all_files = sorted(APPROVED_DIR.glob("*.json"))
+    all_files = sorted(APPROVED_DIR.glob("*/*.json"))
     if not all_files:
         logger.error(f"No JSON files found in {APPROVED_DIR}")
         sys.exit(1)
 
     filtered: list[Path] = []
     for f in all_files:
-        stem = f.stem  # e.g. "L04_beginner"
-        parts = stem.split("_", 1)
-        if len(parts) != 2:
-            logger.warning(f"Skipping unexpected filename: {f.name}")
-            continue
-        file_lesson_id, file_tier_slug = parts[0].upper(), parts[1].lower()
+        # Structure: approved/{tier_slug}/{lesson_id}.json
+        file_tier_slug = f.parent.name.lower()
+        file_lesson_id = f.stem.upper()
 
         if lesson_filter and file_lesson_id != lesson_filter.upper():
             continue
