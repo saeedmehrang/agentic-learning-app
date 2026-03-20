@@ -1,0 +1,40 @@
+# infra/cloudbuild/backend.yaml
+# Cloud Build trigger: push to main → build and push backend image to Artifact Registry.
+# Trigger this manually with:
+#   gcloud builds submit --config infra/cloudbuild/backend.yaml .
+# Or wire to a Cloud Build trigger on push to main.
+
+steps:
+  - name: "gcr.io/cloud-builders/docker"
+    id: build
+    args:
+      - build
+      - --file
+      - backend/Dockerfile
+      - --tag
+      - us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/backend:$COMMIT_SHA
+      - --tag
+      - us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/backend:latest
+      - backend/
+    waitFor: ["-"]
+
+  - name: "gcr.io/cloud-builders/docker"
+    id: push-sha
+    args:
+      - push
+      - us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/backend:$COMMIT_SHA
+    waitFor: [build]
+
+  - name: "gcr.io/cloud-builders/docker"
+    id: push-latest
+    args:
+      - push
+      - us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/backend:latest
+    waitFor: [build]
+
+images:
+  - us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/backend:$COMMIT_SHA
+  - us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/backend:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY
