@@ -26,7 +26,8 @@ from typing import Any
 
 import google.auth
 import google.auth.transport.requests
-import google.generativeai as genai
+import google.genai as genai
+import google.genai.types as genai_types
 import yaml
 
 from config import settings
@@ -175,41 +176,31 @@ def build_prompt(
 # Gemini clients
 # ---------------------------------------------------------------------------
 
-def configure_gemini() -> None:
-    """Configure the google-generativeai SDK using Application Default Credentials."""
+def make_client() -> genai.Client:
+    """Return a google-genai Client using Application Default Credentials."""
     credentials, _ = google.auth.default(
         scopes=["https://www.googleapis.com/auth/generative-language"]
     )
     request = google.auth.transport.requests.Request()
     credentials.refresh(request)
-    genai.configure(credentials=credentials)
+    return genai.Client(credentials=credentials)
 
 
-def get_model() -> genai.GenerativeModel:
-    """Return a configured GenerativeModel instance."""
-    return genai.GenerativeModel(
-        model_name=settings.gemini_model,
-        generation_config=genai.types.GenerationConfig(
-            **{
-                "temperature": settings.generation_temperature,
-                "max_output_tokens": settings.generation_max_output_tokens,
-                "response_mime_type": _RESPONSE_MIME_TYPE,
-            }
-        ),
+def generation_config() -> genai_types.GenerateContentConfig:
+    """Return GenerateContentConfig for the generator model."""
+    return genai_types.GenerateContentConfig(
+        temperature=settings.generation_temperature,
+        max_output_tokens=settings.generation_max_output_tokens,
+        response_mime_type=_RESPONSE_MIME_TYPE,
     )
 
 
-def get_reviewer_model() -> genai.GenerativeModel:
-    """Return a configured GenerativeModel instance for reviewing content."""
-    return genai.GenerativeModel(
-        model_name=settings.reviewer_model,
-        generation_config=genai.types.GenerationConfig(
-            **{
-                "temperature": settings.reviewer_temperature,
-                "max_output_tokens": settings.reviewer_max_output_tokens,
-                "response_mime_type": _RESPONSE_MIME_TYPE,
-            }
-        ),
+def reviewer_config() -> genai_types.GenerateContentConfig:
+    """Return GenerateContentConfig for the reviewer model."""
+    return genai_types.GenerateContentConfig(
+        temperature=settings.reviewer_temperature,
+        max_output_tokens=settings.reviewer_max_output_tokens,
+        response_mime_type=_RESPONSE_MIME_TYPE,
     )
 
 
@@ -222,7 +213,7 @@ async def call_reviewer(
     context: dict[str, Any],
     lesson_review_template: str,
     quiz_review_template: str,
-    reviewer_model: genai.GenerativeModel,
+    client: genai.Client,
     semaphore: asyncio.Semaphore,
 ) -> ReviewResult:
     """Call the reviewer LLM and return a structured ReviewResult."""
@@ -257,7 +248,11 @@ Do not include a "passed" field — it will be computed from your issues.
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
             None,
-            lambda: reviewer_model.generate_content(review_prompt),
+            lambda: client.models.generate_content(
+                model=settings.reviewer_model,
+                contents=review_prompt,
+                config=reviewer_config(),
+            ),
         )
         raw_text: str = response.text
 
@@ -274,7 +269,7 @@ async def call_regenerator(
     combined_template: str,
     lesson_prompt_template: str,
     quiz_prompt_template: str,
-    model: genai.GenerativeModel,
+    client: genai.Client,
     semaphore: asyncio.Semaphore,
 ) -> dict[str, Any]:
     """Regenerate content incorporating reviewer feedback on blocking issues."""
@@ -310,7 +305,11 @@ PREVIOUS GENERATION (for reference):
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
             None,
-            lambda: model.generate_content(regen_prompt),
+            lambda: client.models.generate_content(
+                model=settings.gemini_model,
+                contents=regen_prompt,
+                config=generation_config(),
+            ),
         )
         raw_text: str = response.text
 
@@ -330,8 +329,7 @@ async def generate_one(
     quiz_prompt_template: str,
     lesson_review_template: str,
     quiz_review_template: str,
-    model: genai.GenerativeModel,
-    reviewer_model: genai.GenerativeModel,
+    client: genai.Client,
     semaphore: asyncio.Semaphore,
     dry_run: bool,
     resume: bool,
@@ -378,7 +376,11 @@ async def generate_one(
                 loop = asyncio.get_event_loop()
                 response = await loop.run_in_executor(
                     None,
-                    lambda: model.generate_content(prompt),
+                    lambda: client.models.generate_content(
+                        model=settings.gemini_model,
+                        contents=prompt,
+                        config=generation_config(),
+                    ),
                 )
                 raw_text: str = response.text
             except Exception as exc:
@@ -425,7 +427,7 @@ async def generate_one(
             context=context,
             lesson_review_template=lesson_review_template,
             quiz_review_template=quiz_review_template,
-            reviewer_model=reviewer_model,
+            client=client,
             semaphore=semaphore,
         )
     except Exception as exc:
@@ -458,7 +460,7 @@ async def generate_one(
                 combined_template=combined_template,
                 lesson_prompt_template=lesson_prompt_template,
                 quiz_prompt_template=quiz_prompt_template,
-                model=model,
+                client=client,
                 semaphore=semaphore,
             )
         except Exception as exc:
@@ -524,12 +526,9 @@ async def run_pipeline(
 ) -> None:
     """Run the full generation pipeline with bounded concurrency."""
     if not dry_run:
-        configure_gemini()
-        model = get_model()
-        reviewer_model = get_reviewer_model()
+        client = make_client()
     else:
-        model = None  # type: ignore[assignment]
-        reviewer_model = None  # type: ignore[assignment]
+        client = None  # type: ignore[assignment]
 
     for tier_slug in TIER_FILENAME.values():
         (OUTPUT_DIR / tier_slug).mkdir(parents=True, exist_ok=True)
@@ -551,8 +550,7 @@ async def run_pipeline(
                     quiz_prompt_template=quiz_prompt_template,
                     lesson_review_template=lesson_review_template,
                     quiz_review_template=quiz_review_template,
-                    model=model,
-                    reviewer_model=reviewer_model,
+                    client=client,
                     semaphore=semaphore,
                     dry_run=dry_run,
                     resume=resume,
