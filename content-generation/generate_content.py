@@ -4,7 +4,9 @@ generate_content.py — One-shot lesson + quiz generation pipeline for Linux Bas
 
 For each lesson × tier combination (29 lessons × 3 tiers = 87 total), sends a single
 Gemini API request that produces both lesson content and quiz questions in one JSON
-response, then writes the result to courses/linux-basics/pipeline/generated/.
+response. Generated output is reviewed by a second Gemini call; if blocking issues are
+found, a regeneration pass fixes them. Approved output is written to
+courses/linux-basics/pipeline/approved/.
 
 Usage:
     python generate_content.py [--lesson L04] [--tier Beginner] [--dry-run] [--resume]
@@ -28,6 +30,7 @@ import google.generativeai as genai
 import yaml
 
 from config import settings
+from review_models import ReviewResult
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -63,7 +66,18 @@ LESSON_PROMPT_PATH = (
 QUIZ_PROMPT_PATH = (
     REPO_ROOT / "courses" / "linux-basics" / "prompts" / "quiz_generation.md"
 )
+COMBINED_PROMPT_PATH = (
+    REPO_ROOT / "courses" / "linux-basics" / "prompts" / "combined_generation.md"
+)
+LESSON_REVIEW_PROMPT_PATH = (
+    REPO_ROOT / "courses" / "linux-basics" / "prompts" / "lesson_review.md"
+)
+QUIZ_REVIEW_PROMPT_PATH = (
+    REPO_ROOT / "courses" / "linux-basics" / "prompts" / "quiz_review.md"
+)
 OUTPUT_DIR = REPO_ROOT / "courses" / "linux-basics" / "pipeline" / "generated"
+REVIEWED_DIR = REPO_ROOT / "courses" / "linux-basics" / "pipeline" / "reviewed"
+APPROVED_DIR = REPO_ROOT / "courses" / "linux-basics" / "pipeline" / "approved"
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -140,64 +154,25 @@ def build_context(
 
 def build_prompt(
     context: dict[str, Any],
+    combined_template: str,
     lesson_prompt_template: str,
     quiz_prompt_template: str,
 ) -> str:
-    """
-    Build the full single-call prompt that asks Gemini for both lesson and quiz
-    content in one JSON response.
-    """
-    context_json = json.dumps(context, indent=2)
-
-    prompt = f"""\
-You are generating structured educational content for a Linux basics mobile learning app.
-
-You will produce BOTH lesson content AND quiz questions for a single lesson × tier combination
-in one response. Return a single JSON object with exactly two top-level keys: "lesson" and "quiz".
-
-=== LESSON GENERATION INSTRUCTIONS ===
-
-{lesson_prompt_template}
-
-=== QUIZ GENERATION INSTRUCTIONS ===
-
-{quiz_prompt_template}
-
-=== LESSON × TIER CONTEXT ===
-
-The following compact context object defines this lesson and tier. Use ONLY the information
-in this context — do not introduce concepts beyond what is listed in "concepts" and "examples"
-for Beginner tier. The "generation_note" contains critical constraints; follow them exactly.
-The "assumes" list tells you what the learner already knows from prior lessons.
-
-```json
-{context_json}
-```
-
-=== QUIZ PARAMETERS ===
-
-question_count: {settings.question_count}
-formats: {json.dumps(QUESTION_FORMATS)}
-
-=== OUTPUT FORMAT ===
-
-Return exactly one JSON object with this structure (no markdown fences, no text outside JSON):
-
-{{
-  "lesson": {{ ...lesson JSON matching the lesson_generation.md schema... }},
-  "quiz": {{ ...quiz JSON matching the quiz_generation.md schema... }}
-}}
-
-The "lesson" object must have fields: lesson_id, title, tier, sections, key_takeaways, terminal_steps.
-The "quiz" object must have fields: lesson_id, title, tier, questions.
-
-Ensure lesson_id and tier in both objects match: lesson_id="{context['id']}", tier="{context['tier']}".
-"""
-    return prompt
+    """Build the full generation prompt by injecting context into the combined template."""
+    return (
+        combined_template
+        .replace("{{LESSON_GENERATION_INSTRUCTIONS}}", lesson_prompt_template)
+        .replace("{{QUIZ_GENERATION_INSTRUCTIONS}}", quiz_prompt_template)
+        .replace("{{CONTEXT_JSON}}", json.dumps(context, indent=2))
+        .replace("{{QUESTION_COUNT}}", str(settings.question_count))
+        .replace("{{QUESTION_FORMATS}}", json.dumps(QUESTION_FORMATS))
+        .replace("{{LESSON_ID}}", context["id"])
+        .replace("{{TIER}}", context["tier"])
+    )
 
 
 # ---------------------------------------------------------------------------
-# Gemini client
+# Gemini clients
 # ---------------------------------------------------------------------------
 
 def configure_gemini() -> None:
@@ -224,6 +199,124 @@ def get_model() -> genai.GenerativeModel:
     )
 
 
+def get_reviewer_model() -> genai.GenerativeModel:
+    """Return a configured GenerativeModel instance for reviewing content."""
+    return genai.GenerativeModel(
+        model_name=settings.reviewer_model,
+        generation_config=genai.types.GenerationConfig(
+            **{
+                "temperature": settings.reviewer_temperature,
+                "max_output_tokens": settings.reviewer_max_output_tokens,
+                "response_mime_type": _RESPONSE_MIME_TYPE,
+            }
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Reviewer and regenerator
+# ---------------------------------------------------------------------------
+
+async def call_reviewer(
+    generated: dict[str, Any],
+    context: dict[str, Any],
+    lesson_review_template: str,
+    quiz_review_template: str,
+    reviewer_model: genai.GenerativeModel,
+    semaphore: asyncio.Semaphore,
+) -> ReviewResult:
+    """Call the reviewer LLM and return a structured ReviewResult."""
+    review_prompt = f"""\
+{lesson_review_template}
+
+{quiz_review_template}
+
+=== ORIGINAL LESSON CONTEXT ===
+
+```json
+{json.dumps(context, indent=2)}
+```
+
+=== GENERATED CONTENT TO REVIEW ===
+
+```json
+{json.dumps(generated, indent=2)}
+```
+
+=== OUTPUT FORMAT ===
+
+Return a single JSON object with exactly these top-level keys:
+- "lesson_issues": array of lesson issue objects (may be empty)
+- "quiz_issues": array of quiz issue objects (may be empty)
+- "lesson_summary": string (one sentence overall assessment)
+- "quiz_summary": string (one sentence overall assessment)
+
+Do not include a "passed" field — it will be computed from your issues.
+"""
+    async with semaphore:
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: reviewer_model.generate_content(review_prompt),
+        )
+        raw_text: str = response.text
+
+    data = json.loads(raw_text)
+    result = ReviewResult.model_validate(data)
+    result.compute_passed()
+    return result
+
+
+async def call_regenerator(
+    original_generated: dict[str, Any],
+    review_result: ReviewResult,
+    context: dict[str, Any],
+    combined_template: str,
+    lesson_prompt_template: str,
+    quiz_prompt_template: str,
+    model: genai.GenerativeModel,
+    semaphore: asyncio.Semaphore,
+) -> dict[str, Any]:
+    """Regenerate content incorporating reviewer feedback on blocking issues."""
+    blocking_lesson = [
+        i.model_dump() for i in review_result.lesson_issues if i.severity == "blocking"
+    ]
+    blocking_quiz = [
+        i.model_dump() for i in review_result.quiz_issues if i.severity == "blocking"
+    ]
+
+    revision_section = f"""
+=== REVISION INSTRUCTIONS ===
+
+A previous generation of this content had quality issues. Fix ONLY the blocking issues
+listed below. Preserve all field values not mentioned in the issues exactly as-is.
+Do not restructure or rewrite sections that are not flagged.
+
+LESSON ISSUES TO FIX:
+{json.dumps(blocking_lesson, indent=2)}
+
+QUIZ ISSUES TO FIX:
+{json.dumps(blocking_quiz, indent=2)}
+
+PREVIOUS GENERATION (for reference):
+```json
+{json.dumps(original_generated, indent=2)}
+```
+"""
+    base_prompt = build_prompt(context, combined_template, lesson_prompt_template, quiz_prompt_template)
+    regen_prompt = base_prompt + revision_section
+
+    async with semaphore:
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: model.generate_content(regen_prompt),
+        )
+        raw_text: str = response.text
+
+    return json.loads(raw_text)
+
+
 # ---------------------------------------------------------------------------
 # Single generation unit
 # ---------------------------------------------------------------------------
@@ -232,91 +325,172 @@ async def generate_one(
     lesson_outline: dict[str, Any],
     tier: str,
     concept_map: dict[str, Any],
+    combined_template: str,
     lesson_prompt_template: str,
     quiz_prompt_template: str,
+    lesson_review_template: str,
+    quiz_review_template: str,
     model: genai.GenerativeModel,
+    reviewer_model: genai.GenerativeModel,
     semaphore: asyncio.Semaphore,
-    output_dir: Path,
     dry_run: bool,
     resume: bool,
 ) -> tuple[str, str, str]:
     """
-    Generate content for a single lesson × tier.
+    Generate, review, and optionally regenerate content for a single lesson × tier.
 
-    Returns a tuple of (lesson_id, tier, status) where status is one of:
-    "generated", "skipped", "failed".
+    Returns (lesson_id, tier, status) where status is one of:
+    "approved", "approved_after_regen", "skipped", "failed".
     """
     lesson_id: str = lesson_outline["lesson_id"]
     tier_slug = TIER_FILENAME[tier]
-    output_path = output_dir / f"{lesson_id}_{tier_slug}.json"
+    generated_path = OUTPUT_DIR / f"{lesson_id}_{tier_slug}.json"
+    reviewed_path = REVIEWED_DIR / f"{lesson_id}_{tier_slug}_review.json"
+    approved_path = APPROVED_DIR / f"{lesson_id}_{tier_slug}.json"
     label = f"[{lesson_id} {tier}]"
 
-    # Resume: skip if output already exists
-    if resume and output_path.exists():
-        logger.info(f"{label} Skipped (already exists)")
+    # Resume: skip if approved output already exists
+    if resume and approved_path.exists():
+        logger.info(f"{label} Skipped (already approved)")
         return lesson_id, tier, "skipped"
 
     if dry_run:
-        logger.info(f"{label} Would generate -> {output_path.name}")
+        logger.info(f"{label} Would generate -> {approved_path.name}")
         return lesson_id, tier, "skipped"
 
     logger.info(f"{label} Generating...")
     start = time.monotonic()
 
     context = build_context(lesson_outline, concept_map, tier)
-    prompt = build_prompt(context, lesson_prompt_template, quiz_prompt_template)
 
-    async with semaphore:
+    # --- Phase 1: Generate (or load from generated/ if partial resume) ---
+    if resume and generated_path.exists():
+        logger.info(f"{label} Loading existing generated content...")
         try:
-            # google-generativeai does not have a native async API; run in executor
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: model.generate_content(prompt),
-            )
-            raw_text: str = response.text
+            raw_data: dict[str, Any] = json.loads(generated_path.read_text(encoding="utf-8"))
         except Exception as exc:
+            logger.error(f"{label} Failed to load generated file: {exc}")
+            return lesson_id, tier, "failed"
+    else:
+        prompt = build_prompt(context, combined_template, lesson_prompt_template, quiz_prompt_template)
+        async with semaphore:
+            try:
+                loop = asyncio.get_event_loop()
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: model.generate_content(prompt),
+                )
+                raw_text: str = response.text
+            except Exception as exc:
+                elapsed = time.monotonic() - start
+                logger.error(f"{label} FAILED ({elapsed:.1f}s): {exc}")
+                _write_error(generated_path, f"API error: {exc}", "")
+                return lesson_id, tier, "failed"
+
+        try:
+            raw_data = json.loads(raw_text)
+        except json.JSONDecodeError as exc:
             elapsed = time.monotonic() - start
-            logger.error(f"{label} FAILED ({elapsed:.1f}s): {exc}")
-            _write_error(output_path, f"API error: {exc}", "")
+            logger.error(f"{label} FAILED ({elapsed:.1f}s): Invalid JSON — {exc}")
+            _write_error(generated_path, f"JSON decode error: {exc}", raw_text)
             return lesson_id, tier, "failed"
 
-    # Parse the JSON response
+        if "lesson" not in raw_data or "quiz" not in raw_data:
+            elapsed = time.monotonic() - start
+            msg = f'Response missing "lesson" or "quiz" key. Keys found: {list(raw_data.keys())}'
+            logger.error(f"{label} FAILED ({elapsed:.1f}s): {msg}")
+            _write_error(generated_path, msg, raw_text)
+            return lesson_id, tier, "failed"
+
+        generated_output: dict[str, Any] = {
+            "lesson_id": lesson_id,
+            "tier": tier,
+            "lesson": raw_data["lesson"],
+            "quiz": raw_data["quiz"],
+        }
+        try:
+            with generated_path.open("w", encoding="utf-8") as f:
+                json.dump(generated_output, f, indent=2, ensure_ascii=False)
+        except OSError as exc:
+            elapsed = time.monotonic() - start
+            logger.error(f"{label} FAILED ({elapsed:.1f}s): Could not write generated file — {exc}")
+            return lesson_id, tier, "failed"
+        raw_data = generated_output
+
+    # --- Phase 2: Review ---
+    logger.info(f"{label} Reviewing...")
     try:
-        data: dict[str, Any] = json.loads(raw_text)
-    except json.JSONDecodeError as exc:
+        review_result = await call_reviewer(
+            generated=raw_data,
+            context=context,
+            lesson_review_template=lesson_review_template,
+            quiz_review_template=quiz_review_template,
+            reviewer_model=reviewer_model,
+            semaphore=semaphore,
+        )
+    except Exception as exc:
         elapsed = time.monotonic() - start
-        logger.error(f"{label} FAILED ({elapsed:.1f}s): Invalid JSON — {exc}")
-        _write_error(output_path, f"JSON decode error: {exc}", raw_text)
+        logger.error(f"{label} Review FAILED ({elapsed:.1f}s): {exc}")
         return lesson_id, tier, "failed"
 
-    # Validate top-level structure
-    if "lesson" not in data or "quiz" not in data:
-        elapsed = time.monotonic() - start
-        msg = f'Response missing "lesson" or "quiz" key. Keys found: {list(data.keys())}'
-        logger.error(f"{label} FAILED ({elapsed:.1f}s): {msg}")
-        _write_error(output_path, msg, raw_text)
-        return lesson_id, tier, "failed"
-
-    # Build the final output document
-    output: dict[str, Any] = {
-        "lesson_id": lesson_id,
-        "tier": tier,
-        "lesson": data["lesson"],
-        "quiz": data["quiz"],
-    }
-
     try:
-        with output_path.open("w", encoding="utf-8") as f:
-            json.dump(output, f, indent=2, ensure_ascii=False)
+        with reviewed_path.open("w", encoding="utf-8") as f:
+            json.dump(review_result.model_dump(), f, indent=2, ensure_ascii=False)
+    except OSError as exc:
+        logger.warning(f"{label} Could not write review file: {exc}")
+
+    # --- Phase 3: Conditional regeneration ---
+    if review_result.passed:
+        final = raw_data
+        status = "approved"
+        logger.info(f"{label} Review passed.")
+    else:
+        blocking_count = sum(
+            1 for i in review_result.lesson_issues + review_result.quiz_issues
+            if i.severity == "blocking"
+        )
+        logger.info(f"{label} Review found {blocking_count} blocking issue(s). Regenerating...")
+        try:
+            regen_data = await call_regenerator(
+                original_generated=raw_data,
+                review_result=review_result,
+                context=context,
+                combined_template=combined_template,
+                lesson_prompt_template=lesson_prompt_template,
+                quiz_prompt_template=quiz_prompt_template,
+                model=model,
+                semaphore=semaphore,
+            )
+        except Exception as exc:
+            elapsed = time.monotonic() - start
+            logger.error(f"{label} Regen FAILED ({elapsed:.1f}s): {exc}")
+            return lesson_id, tier, "failed"
+
+        if "lesson" not in regen_data or "quiz" not in regen_data:
+            elapsed = time.monotonic() - start
+            logger.error(f"{label} FAILED ({elapsed:.1f}s): Regen missing lesson/quiz keys")
+            return lesson_id, tier, "failed"
+
+        final = {
+            "lesson_id": lesson_id,
+            "tier": tier,
+            "lesson": regen_data["lesson"],
+            "quiz": regen_data["quiz"],
+        }
+        status = "approved_after_regen"
+
+    # --- Phase 4: Write approved output ---
+    try:
+        with approved_path.open("w", encoding="utf-8") as f:
+            json.dump(final, f, indent=2, ensure_ascii=False)
     except OSError as exc:
         elapsed = time.monotonic() - start
-        logger.error(f"{label} FAILED ({elapsed:.1f}s): Could not write output — {exc}")
+        logger.error(f"{label} FAILED ({elapsed:.1f}s): Could not write approved file — {exc}")
         return lesson_id, tier, "failed"
 
     elapsed = time.monotonic() - start
-    logger.info(f"{label} Done ({elapsed:.1f}s)")
-    return lesson_id, tier, "generated"
+    logger.info(f"{label} Done ({elapsed:.1f}s) — {status}")
+    return lesson_id, tier, status
 
 
 def _write_error(output_path: Path, message: str, raw_response: str) -> None:
@@ -340,8 +514,11 @@ async def run_pipeline(
     lessons: list[dict[str, Any]],
     tiers: list[str],
     concept_map: dict[str, Any],
+    combined_template: str,
     lesson_prompt_template: str,
     quiz_prompt_template: str,
+    lesson_review_template: str,
+    quiz_review_template: str,
     dry_run: bool,
     resume: bool,
 ) -> None:
@@ -349,10 +526,14 @@ async def run_pipeline(
     if not dry_run:
         configure_gemini()
         model = get_model()
+        reviewer_model = get_reviewer_model()
     else:
         model = None  # type: ignore[assignment]
+        reviewer_model = None  # type: ignore[assignment]
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    REVIEWED_DIR.mkdir(parents=True, exist_ok=True)
+    APPROVED_DIR.mkdir(parents=True, exist_ok=True)
 
     semaphore = asyncio.Semaphore(settings.concurrency_limit)
 
@@ -364,11 +545,14 @@ async def run_pipeline(
                     lesson_outline=lesson_outline,
                     tier=tier,
                     concept_map=concept_map,
+                    combined_template=combined_template,
                     lesson_prompt_template=lesson_prompt_template,
                     quiz_prompt_template=quiz_prompt_template,
+                    lesson_review_template=lesson_review_template,
+                    quiz_review_template=quiz_review_template,
                     model=model,
+                    reviewer_model=reviewer_model,
                     semaphore=semaphore,
-                    output_dir=OUTPUT_DIR,
                     dry_run=dry_run,
                     resume=resume,
                 )
@@ -377,14 +561,15 @@ async def run_pipeline(
     results = await asyncio.gather(*tasks, return_exceptions=False)
 
     # Tally results
-    counts: dict[str, int] = {"generated": 0, "skipped": 0, "failed": 0}
+    counts: dict[str, int] = {"approved": 0, "approved_after_regen": 0, "skipped": 0, "failed": 0}
     for _lesson_id, _tier, status in results:
         counts[status] = counts.get(status, 0) + 1
 
     total = len(results)
     logger.info(
         f"\nSummary: {total} combinations — "
-        f"{counts['generated']} generated, "
+        f"{counts['approved']} approved, "
+        f"{counts['approved_after_regen']} approved_after_regen, "
         f"{counts['skipped']} skipped, "
         f"{counts['failed']} failed."
     )
@@ -417,7 +602,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--resume",
         action="store_true",
-        help="Skip lesson × tier combinations where the output file already exists.",
+        help="Skip lesson × tier combinations where the approved output file already exists.",
     )
     return parser.parse_args()
 
@@ -439,6 +624,12 @@ def main() -> None:
         sys.exit(1)
 
     try:
+        combined_template = load_prompt(COMBINED_PROMPT_PATH)
+    except Exception as exc:
+        logger.error(f"Failed to load combined prompt from {COMBINED_PROMPT_PATH}: {exc}")
+        sys.exit(1)
+
+    try:
         lesson_prompt_template = load_prompt(LESSON_PROMPT_PATH)
     except Exception as exc:
         logger.error(f"Failed to load lesson prompt from {LESSON_PROMPT_PATH}: {exc}")
@@ -448,6 +639,18 @@ def main() -> None:
         quiz_prompt_template = load_prompt(QUIZ_PROMPT_PATH)
     except Exception as exc:
         logger.error(f"Failed to load quiz prompt from {QUIZ_PROMPT_PATH}: {exc}")
+        sys.exit(1)
+
+    try:
+        lesson_review_template = load_prompt(LESSON_REVIEW_PROMPT_PATH)
+    except Exception as exc:
+        logger.error(f"Failed to load lesson review prompt from {LESSON_REVIEW_PROMPT_PATH}: {exc}")
+        sys.exit(1)
+
+    try:
+        quiz_review_template = load_prompt(QUIZ_REVIEW_PROMPT_PATH)
+    except Exception as exc:
+        logger.error(f"Failed to load quiz review prompt from {QUIZ_REVIEW_PROMPT_PATH}: {exc}")
         sys.exit(1)
 
     # Filter lessons
@@ -471,18 +674,22 @@ def main() -> None:
     mode = "dry-run" if args.dry_run else "live"
     logger.info(
         f"Content generation pipeline starting — {total} combination(s), "
-        f"model={settings.gemini_model}, concurrency={settings.concurrency_limit}, mode={mode}"
+        f"model={settings.gemini_model}, reviewer={settings.reviewer_model}, "
+        f"concurrency={settings.concurrency_limit}, mode={mode}"
     )
     if args.resume:
-        logger.info("Resume mode: existing files will be skipped.")
+        logger.info("Resume mode: existing approved files will be skipped.")
 
     asyncio.run(
         run_pipeline(
             lessons=lessons,
             tiers=tiers,
             concept_map=concept_map,
+            combined_template=combined_template,
             lesson_prompt_template=lesson_prompt_template,
             quiz_prompt_template=quiz_prompt_template,
+            lesson_review_template=lesson_review_template,
+            quiz_review_template=quiz_review_template,
             dry_run=args.dry_run,
             resume=args.resume,
         )

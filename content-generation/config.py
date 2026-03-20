@@ -17,6 +17,11 @@ class ContentSettings(BaseSettings):
     generation_temperature: float = 0.7
     generation_max_output_tokens: int = 8192
 
+    # Reviewer LLM
+    reviewer_model: str = "gemini-2.0-flash"
+    reviewer_temperature: float = 0.2
+    reviewer_max_output_tokens: int = 2048
+
     # Pipeline behaviour
     concurrency_limit: int = 5
     question_count: int = 8
