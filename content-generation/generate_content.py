@@ -27,6 +27,8 @@ import google.auth.transport.requests
 import google.generativeai as genai
 import yaml
 
+from config import settings
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -43,15 +45,7 @@ TIER_INITIAL: dict[str, str] = {
     "Advanced": "A",
 }
 
-GEMINI_MODEL = "gemini-2.0-flash"
-GENERATION_CONFIG = {
-    "temperature": 0.7,
-    "max_output_tokens": 8192,
-    "response_mime_type": "application/json",
-}
-
-CONCURRENCY_LIMIT = 5
-QUESTION_COUNT = 8
+_RESPONSE_MIME_TYPE = "application/json"
 QUESTION_FORMATS = ["multiple_choice", "true_false", "fill_blank", "command_completion"]
 
 # ---------------------------------------------------------------------------
@@ -182,7 +176,7 @@ The "assumes" list tells you what the learner already knows from prior lessons.
 
 === QUIZ PARAMETERS ===
 
-question_count: {QUESTION_COUNT}
+question_count: {settings.question_count}
 formats: {json.dumps(QUESTION_FORMATS)}
 
 === OUTPUT FORMAT ===
@@ -219,8 +213,14 @@ def configure_gemini() -> None:
 def get_model() -> genai.GenerativeModel:
     """Return a configured GenerativeModel instance."""
     return genai.GenerativeModel(
-        model_name=GEMINI_MODEL,
-        generation_config=genai.types.GenerationConfig(**GENERATION_CONFIG),
+        model_name=settings.gemini_model,
+        generation_config=genai.types.GenerationConfig(
+            **{
+                "temperature": settings.generation_temperature,
+                "max_output_tokens": settings.generation_max_output_tokens,
+                "response_mime_type": _RESPONSE_MIME_TYPE,
+            }
+        ),
     )
 
 
@@ -354,7 +354,7 @@ async def run_pipeline(
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
+    semaphore = asyncio.Semaphore(settings.concurrency_limit)
 
     tasks = []
     for lesson_outline in lessons:
@@ -471,7 +471,7 @@ def main() -> None:
     mode = "dry-run" if args.dry_run else "live"
     logger.info(
         f"Content generation pipeline starting — {total} combination(s), "
-        f"model={GEMINI_MODEL}, concurrency={CONCURRENCY_LIMIT}, mode={mode}"
+        f"model={settings.gemini_model}, concurrency={settings.concurrency_limit}, mode={mode}"
     )
     if args.resume:
         logger.info("Resume mode: existing files will be skipped.")
