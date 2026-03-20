@@ -10,7 +10,7 @@
 | Phase 0 | Project Setup & GCP Infrastructure | ☐ |
 | Phase 1 | Content & Knowledge Base | ☐ |
 | Phase 2 | Character Asset Production | ☐ |
-| Phase 3 | Backend Scaffold & Agent Foundation | ☐ |
+| Phase 3 | Backend Scaffold & Agent Foundation | 🔧 (code done; Cloud Run deploy pending) |
 | Phase 4 | Core Agent Pipeline | ☐ |
 | Phase 5 | Flutter App | ☐ |
 | Phase 6 | Trial Launch & Iteration | ☐ |
@@ -192,32 +192,42 @@ Practical split:
 > **Goal:** A running Cloud Run service with the ADK pipeline skeleton wired to live GCP data sources. The `search_knowledge_base` tool and ContextAgent are working end-to-end. This is the foundation all other agents build on.
 
 ### 3.1 ADK Project Scaffold
-- [ ] Initialise ADK project structure with `adk init`
-- [ ] Define the top-level sequential agent pipeline: `ContextAgent → LessonAgent → HelpAgent (conditional) → SummaryAgent`
-- [ ] Set up `pyproject.toml` / `requirements.txt` with all ADK and GCP library dependencies
-- [ ] Write a local `.env` config loader that reads from Secret Manager in production and from `.env` in dev
-- [ ] Set up structured logging (JSON format) for Cloud Run compatibility
+- [x] Initialise ADK project structure — directories `backend/agents/`, `backend/tools/`, `backend/tests/` created; `backend/pyproject.toml` updated with all ADK and GCP dependencies (`google-adk>=1.0.0`, `fastapi`, `uvicorn`, `pydantic-settings`, `google-cloud-secret-manager`)
+- [x] Define the top-level sequential agent pipeline skeleton: `ContextAgent → LessonAgent → HelpAgent (conditional) → SummaryAgent` — wired in `backend/pipeline.py` as a `SequentialAgent`; Phase 4 agents are stubbed out in comments
+- [x] Write `backend/config.py` — pydantic-settings loader that reads `.env` in dev (`APP_ENV=development`) and Secret Manager in production (`APP_ENV=production`); fixed model assignments per CLAUDE.md
+- [x] Write `backend/logging_config.py` — `JsonFormatter` + `configure_logging()` producing structured JSON logs for Cloud Run log ingestion
 
 ### 3.2 `search_knowledge_base` Tool
-- [ ] Implement `search_knowledge_base(concept_id, tier)` as a standalone Python tool (not an agent)
-- [ ] Tool logic: embed the concept query via Vertex AI `text-embedding-004`, run pgvector cosine similarity search, return top-3 content chunks filtered by difficulty tier
-- [ ] Wire Cloud SQL connection via Cloud SQL Auth Proxy (local) and private IP (Cloud Run)
-- [ ] Unit test: verify the correct chunks are returned for several concept queries at each of the 3 difficulty tiers
+- [x] Implement `backend/tools/search_knowledge_base.py` — async Python tool (auto-wrapped by ADK); embeds via Vertex AI `text-embedding-005` (`RETRIEVAL_QUERY` task type, 768-dim); pgvector cosine similarity query with tier `WHERE` filter before `ORDER BY`; returns top-3 chunks; module-level connection pool (psycopg2 `ThreadedConnectionPool`); all I/O via `run_in_executor`; returns `[]` on any error
+- [x] Unit tests in `backend/tests/tools/test_search_knowledge_base.py` — 5 tests covering: correct chunk return shape, tier isolation, empty result, DB error, embedding error; all pass
 
 ### 3.3 ContextAgent
-- [ ] Implement ContextAgent as an `LlmAgent` (Gemini 2.5 Flash-Lite)
-- [ ] Wire Firestore read: fetch learner profile, FSRS-scheduled next concept(s), difficulty tier, and last session summary
-- [ ] Implement logic to determine which module character to assign based on the scheduled concept's module
-- [ ] Output structured JSON: `{ next_concept_id, difficulty_tier, module_character_id, session_goal }`
-- [ ] Unit test: mock Firestore reads, verify correct concept and character selection logic for several learner states (new learner, returning learner, struggling learner)
+- [x] Implement `backend/agents/context_agent.py` — `LlmAgent` (Gemini 2.5 Flash-Lite); `read_learner_context` Firestore tool reads learner profile, all concept schedules, and most recent session; `MODULE_CHARACTER` mapping (9 modules); `ContextOutput` Pydantic schema (`next_concept_id`, `difficulty_tier`, `module_character_id`, `session_goal`); `output_schema` + `output_key="context_output"` for downstream pipeline access
+- [x] Unit tests in `backend/tests/agents/test_context_agent.py` — 7 tests covering: character mapping completeness and uniqueness, new learner shape, concept list completeness, Timestamp → ISO conversion, missing profile defaults, last session inclusion; all pass
 
 ### 3.4 Cloud Run Deployment (Skeleton)
-- [ ] Write `Dockerfile` for the ADK service
-- [ ] Set up Cloud Build trigger: push to `main` → build and push Docker image to Artifact Registry
-- [ ] Deploy skeleton service to Cloud Run (scale-to-zero, minimum instances = 0)
-- [ ] Configure Cloud Run environment variables via Secret Manager references
-- [ ] Verify deployed service responds to a health-check endpoint
-- [ ] Set up VPC connector so Cloud Run can reach Cloud SQL via private IP
+- [x] Write `backend/Dockerfile` — `python:3.13-slim` base, `uv pip install --system`, build context is `backend/`
+- [x] Write `infra/cloudbuild/backend.yaml` — builds and pushes `backend:$COMMIT_SHA` and `backend:latest` to `us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/`
+- [x] Write `backend/main.py` — FastAPI app with `GET /health` (200 `{"status":"ok"}`) and `POST /session/start` stub; lifespan structured logging
+- [ ] ⚙️ **OPERATIONAL**: Trigger Cloud Build manually and verify image lands in Artifact Registry:
+  ```
+  gcloud builds submit --config infra/cloudbuild/backend.yaml .
+  ```
+- [ ] ⚙️ **OPERATIONAL**: Deploy skeleton service to Cloud Run (scale-to-zero):
+  ```
+  gcloud run deploy learning-backend \
+    --image us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/backend:latest \
+    --region us-central1 \
+    --platform managed \
+    --allow-unauthenticated \
+    --min-instances 0 \
+    --service-account cloud-run-app-identity@agentic-learning-app-e13cb.iam.gserviceaccount.com \
+    --set-env-vars APP_ENV=production,GCP_PROJECT_ID=agentic-learning-app-e13cb \
+    --set-secrets DB_PASSWORD=DB_PASSWORD:latest,DB_CONNECTION_NAME=DB_CONNECTION_NAME:latest
+  ```
+- [ ] ⚙️ **OPERATIONAL**: Verify health check responds: `curl https://<cloud-run-url>/health`
+- [ ] ⚙️ **OPERATIONAL**: Set up VPC connector so Cloud Run can reach Cloud SQL via private IP (required for live DB queries in Phase 4 — not needed until `search_knowledge_base` is called against a real DB)
+- [ ] ⚙️ **OPERATIONAL**: Wire Cloud Build trigger in GCP Console: push to `main` branch → run `infra/cloudbuild/backend.yaml`
 
 ---
 
