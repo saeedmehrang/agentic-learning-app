@@ -186,12 +186,20 @@ def make_client() -> genai.Client:
     return genai.Client(credentials=credentials)
 
 
+def _thinking_config(model: str, level: str | None) -> genai_types.ThinkingConfig | None:
+    """Return ThinkingConfig only for Gemini 3 models; None otherwise."""
+    if level is not None and model.startswith("gemini-3"):
+        return genai_types.ThinkingConfig(thinking_level=level)
+    return None
+
+
 def generation_config() -> genai_types.GenerateContentConfig:
     """Return GenerateContentConfig for the generator model."""
     return genai_types.GenerateContentConfig(
         temperature=settings.generation_temperature,
         max_output_tokens=settings.generation_max_output_tokens,
         response_mime_type=_RESPONSE_MIME_TYPE,
+        thinking_config=_thinking_config(settings.gemini_model, settings.generation_thinking_level),
     )
 
 
@@ -201,6 +209,7 @@ def reviewer_config() -> genai_types.GenerateContentConfig:
         temperature=settings.reviewer_temperature,
         max_output_tokens=settings.reviewer_max_output_tokens,
         response_mime_type=_RESPONSE_MIME_TYPE,
+        thinking_config=_thinking_config(settings.reviewer_model, settings.reviewer_thinking_level),
     )
 
 
