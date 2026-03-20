@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
 
     # Model assignments (fixed per CLAUDE.md — do not change)
-    context_agent_model: str = "gemini-2.5-flash-preview-05-20"
+    context_agent_model: str = "gemini-2.5-flash-lite-preview-06-17"
     lesson_agent_model: str = "gemini-2.5-flash-preview-05-20"
     help_agent_model: str = "gemini-2.5-flash-lite-preview-06-17"
     summary_agent_model: str = "gemini-2.5-flash-lite-preview-06-17"
