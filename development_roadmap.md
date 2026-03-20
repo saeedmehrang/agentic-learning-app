@@ -93,38 +93,69 @@ Practical split:
 >
 > **Why this matters for quality:** The generation script uses the concept map to build a compact per-lesson context (~40 lines) — the target lesson block plus one-line summaries of prerequisite concepts. This prevents Gemini's context window from being filled with irrelevant lessons while still giving it the cross-lesson awareness needed to write coherent, non-repetitive content.
 
-- [ ] Generate `content/linux_basics_concept_map.json` using Claude Code (Sonnet) from the completed outlines YAML
-- [ ] Human review: confirm concept introduction order is correct and no concept is listed as assumed before it is introduced
-- [ ] **For every future course:** repeat this step — generate `content/{course_id}_concept_map.json` before running any content generation
+- [x] Generate `courses/linux-basics/concept_map.json` using Claude Code (Sonnet) from the completed outlines YAML
+- [x] Human review: confirm concept introduction order is correct and no concept is listed as assumed before it is introduced
+- [ ] **For every future course:** repeat this step — generate `courses/{course_id}/concept_map.json` before running any content generation
 
 ### 1.3 Content Generation Pipeline
-- [x] Write prompt templates for lesson and quiz generation — committed to `content/prompts/`
-  - `content/prompts/lesson_generation.md` — 3-tier lesson prompt with `terminal_steps` schema
-  - `content/prompts/quiz_generation.md` — 4-format quiz prompt, all tap-to-select
-- [ ] Write `content/generate_content.py`:
-  - Reads `content/outlines/linux_basics_outlines.yaml` and `content/linux_basics_concept_map.json`
+- [x] Write prompt templates for lesson and quiz generation — committed to `courses/linux-basics/prompts/`
+  - `courses/linux-basics/prompts/lesson_generation.md` — 3-tier lesson prompt with `terminal_steps` schema
+  - `courses/linux-basics/prompts/quiz_generation.md` — 4-format quiz prompt, all tap-to-select
+- [x] Write `content-generation/generate_content.py`:
+  - Reads `courses/linux-basics/outlines.yaml` and `courses/linux-basics/concept_map.json`
   - Builds a compact per-lesson context (lesson block + prereq concept summaries from the map)
-  - Calls Gemini 3 Flash for each lesson × tier combination (87 lesson calls + 87 quiz calls = 174 total)
+  - Single Gemini call per lesson × tier produces both lesson content and quiz questions
   - Default quiz parameters: 8 questions per lesson per tier, all 4 formats
-  - Writes structured JSON output to `content/generated/`
-- [ ] Run content generation for all 29 lessons × 3 tiers = 87 content chunks + 87 quiz sets
-- [ ] Human review: read and approve all generated content — flag any lessons needing regeneration or manual edits
-- [ ] Embed all approved content chunks using Vertex AI `text-embedding-004` (768-dim vectors)
+  - Writes structured JSON output to `courses/linux-basics/pipeline/generated/`
+  - Supports `--lesson`, `--tier`, `--dry-run`, `--resume` flags; bounded async concurrency (default 5)
+- [ ] ⚙️ **OPERATIONAL**: Run content generation — `python content-generation/generate_content.py --resume`
+  - 87 total API calls (29 lessons × 3 tiers), model = `gemini-2.0-flash`
+  - Output: `courses/linux-basics/pipeline/generated/L##_[tier].json` (gitignored)
+- [ ] **OPERATIONAL**: Human review — read all generated files, move approved ones to `courses/linux-basics/pipeline/approved/`; flag any for regeneration
+- [x] Write `content-generation/embed_content.py`:
+  - Reads approved JSON from `courses/linux-basics/pipeline/approved/`
+  - Calls Vertex AI `text-embedding-005` (768-dim, `RETRIEVAL_DOCUMENT` task type)
+  - Writes embedded JSON (text + vector + quiz pass-through) to `courses/linux-basics/pipeline/embedded/`
+  - Supports `--lesson`, `--tier`, `--dry-run`, `--resume` flags; bounded async concurrency (default 5)
+- [ ] ⚙️ **OPERATIONAL**: Run embedding — `python content-generation/embed_content.py --resume`
 
 ### 1.4 Quiz Question Generation
 > Quiz generation is integrated into `generate_content.py` (see 1.3) — not a separate script. Each Gemini call produces both the lesson content and the quiz questions for that lesson × tier in a single pass.
 
-- [ ] Human review: validate all quiz questions for correctness and appropriate difficulty per tier
-- [ ] Ensure every question has `answer`, `options[]` (where applicable), and `explanation` fields populated — no `accept_variants` or free-text input fields (all formats are tap-to-select)
+- [ ] **OPERATIONAL**: Human review — validate all quiz questions for correctness and appropriate difficulty per tier
+- [ ] **OPERATIONAL**: Ensure every question has `answer`, `options[]` (where applicable), and `explanation` fields populated — no `accept_variants` or free-text input fields (all formats are tap-to-select)
 
 ### 1.5 Database Loading
-> **Note:** Before starting this phase, check Claude memory file `project_phase14_db_seeding.md` — VPC connector and Cloud Run Job infrastructure must be in place before any seeding scripts can run. See also Phase 3.2 (VPC connector) which may need to be pulled forward.
 
-- [ ] Run Cloud SQL schema migrations to create `lessons`, `content_chunks`, and `quiz_questions` tables
-- [ ] Write a database seeding script to bulk-insert all approved content chunks with their vector embeddings
-- [ ] Write a database seeding script to bulk-insert all approved quiz questions
-- [ ] Verify data: run test pgvector queries — confirm cosine similarity search returns the correct top-3 chunks for sample concept queries at each difficulty tier
-- [ ] Seed the 9 module character assignment records (`module_id` → `character_id` mapping)
+> **Note:** VPC connector is NOT required for the seed job. `seed_db.py` uses the Cloud SQL Python Connector (TLS tunnel via Admin API), which works from Cloud Run Jobs without private IP access. The old memory file `project_phase14_db_seeding.md` is superseded by the steps below.
+
+- [x] Write `infra/sql/001_create_schema.sql` — idempotent DDL for `lessons`, `content_chunks` (ivfflat pgvector index), `quiz_questions`
+- [x] Write `infra/scripts/apply_schema.sh` — applies DDL via `gcloud sql connect` (same pattern as `enable_pgvector.sh`)
+- [x] Write `content-generation/seed_db.py` — Cloud Run Job script; reads embedded JSON, bulk-inserts into Cloud SQL via Cloud SQL Python Connector; all inserts idempotent
+- [x] Write `content-generation/Dockerfile.seed` — image for the Cloud Run Job (build context = repo root)
+- [x] Write `infra/terraform/artifact_registry.tf` — provisions Docker image registry; grants Cloud Run SA reader access
+- [ ] ⚙️ **OPERATIONAL**: Provision Artifact Registry — `terraform apply` in `infra/terraform/`
+- [ ] ⚙️ **OPERATIONAL**: Enable pgvector — `./infra/scripts/enable_pgvector.sh` (one-time)
+- [ ] ⚙️ **OPERATIONAL**: Apply schema — `./infra/scripts/apply_schema.sh` (one-time)
+- [ ] ⚙️ **OPERATIONAL**: Build and push seed image:
+  ```
+  IMAGE=us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/content-seed:latest
+  gcloud builds submit --tag "$IMAGE" --dockerfile content-generation/Dockerfile.seed .
+  ```
+- [ ] ⚙️ **OPERATIONAL**: Create Cloud Run Job (one-time):
+  ```
+  gcloud run jobs create content-seed --image "$IMAGE" --region us-central1 \
+    --service-account cloud-run-app-identity@agentic-learning-app-e13cb.iam.gserviceaccount.com \
+    --set-secrets DB_PASSWORD=DB_PASSWORD:latest,DB_INSTANCE_CONNECTION_NAME=DB_CONNECTION_NAME:latest \
+    --memory 512Mi --max-retries 1
+  ```
+- [ ] ⚙️ **OPERATIONAL**: Execute seed job — `gcloud run jobs execute content-seed --region us-central1 --wait`
+- [ ] ⚙️ **OPERATIONAL**: Verify data via `gcloud sql connect`:
+  - `SELECT COUNT(*) FROM lessons;` — expect 29
+  - `SELECT COUNT(*) FROM content_chunks;` — expect 87
+  - `SELECT COUNT(*) FROM quiz_questions;` — expect 696 (87 × 8)
+  - Run a test cosine similarity query to confirm pgvector search works
+- [ ] Seed the 9 module character assignment records (`module_id` → `character_id` mapping) — deferred to Phase 2 when characters are finalised
 
 ---
 
