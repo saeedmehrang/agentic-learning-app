@@ -8,12 +8,14 @@ End-to-end pipeline for generating, embedding, and seeding Linux Basics course c
 outlines.yaml + concept_map.json
         │
         ▼
-generate_content.py   →  courses/linux-basics/pipeline/generated/   (Gemini, 87 API calls)
-        │
-   [human review]
+generate_content.py   →  pipeline/generated/   (Gemini generation, up to 87 API calls)
         │
         ▼
-  pipeline/approved/
+   [auto review]       →  pipeline/reviewed/    (Gemini reviewer at temp=0.2, structured JSON)
+        │
+   blocking issues?
+   yes → regenerate    →  pipeline/approved/    (fixed by second generation pass)
+   no  ─────────────►  pipeline/approved/
         │
         ▼
 embed_content.py      →  courses/linux-basics/pipeline/embedded/    (Vertex AI text-embedding-005)
@@ -30,7 +32,8 @@ The `pipeline/` directory is gitignored and created at runtime.
 
 | Script | Purpose |
 |---|---|
-| `generate_content.py` | Calls Gemini to generate lesson content + quiz questions for each lesson × tier |
+| `generate_content.py` | Calls Gemini to generate, review, and (if needed) regenerate lesson + quiz content |
+| `review_models.py` | Pydantic models for structured reviewer output (`ReviewResult`, issue types) |
 | `embed_content.py` | Calls Vertex AI to produce 768-dim embeddings for approved lesson content |
 | `seed_db.py` | Inserts embedded content (lessons, chunks, quiz questions) into Cloud SQL |
 | `config.py` | Shared pydantic-settings config loaded from `../.env` |
@@ -73,11 +76,17 @@ python content-generation/generate_content.py [options]
 | `--dry-run` | Print what would be generated without calling the API |
 | `--resume` | Skip combinations where the output file already exists |
 
-**Output:** `courses/linux-basics/pipeline/generated/L##_[tier].json`
+**Output:** Up to three files per combination:
 
-On failure, a `.error` file is written alongside the expected output with the error message and raw API response.
+| Directory | File | Purpose |
+|---|---|---|
+| `pipeline/generated/` | `L##_[tier].json` | Raw Gemini output |
+| `pipeline/reviewed/` | `L##_[tier]_review.json` | Reviewer's structured feedback (audit trail) |
+| `pipeline/approved/` | `L##_[tier].json` | Final content — read by `embed_content.py` |
 
-Each output file shape:
+On failure, a `.error` file is written alongside the expected `generated/` path with the error message and raw API response.
+
+Each approved file has the same shape as the generated file:
 ```json
 {
   "lesson_id": "L04",
@@ -87,7 +96,20 @@ Each output file shape:
 }
 ```
 
-**After generation:** read all files in `pipeline/generated/`, then move approved ones to `pipeline/approved/`. Files needing changes can be regenerated with `--lesson L04 --tier Beginner`.
+Each review file shape:
+```json
+{
+  "passed": true,
+  "lesson_issues": [],
+  "quiz_issues": [],
+  "lesson_summary": "...",
+  "quiz_summary": "..."
+}
+```
+
+**Per combination, up to 3 LLM calls are made:** generate → review → regenerate (only if the reviewer found blocking issues). If review passes, `approved/` is written directly from the generated output.
+
+**`--resume` behaviour:** skips combinations where `pipeline/approved/` already exists. If a file exists in `pipeline/generated/` but not `pipeline/approved/`, the generation step is skipped and only the review + optional regen are re-run — useful for updating reviewer prompts without regenerating all 87 combinations.
 
 ---
 
@@ -200,6 +222,9 @@ Settings are loaded from `../.env` via `config.py` (pydantic-settings, `extra="i
 | `GEMINI_MODEL` | `gemini-2.0-flash` | `generate_content.py` |
 | `GENERATION_TEMPERATURE` | `0.7` | `generate_content.py` |
 | `GENERATION_MAX_OUTPUT_TOKENS` | `8192` | `generate_content.py` |
+| `REVIEWER_MODEL` | `gemini-2.0-flash` | `generate_content.py` |
+| `REVIEWER_TEMPERATURE` | `0.2` | `generate_content.py` |
+| `REVIEWER_MAX_OUTPUT_TOKENS` | `2048` | `generate_content.py` |
 | `CONCURRENCY_LIMIT` | `5` | `generate_content.py` |
 | `QUESTION_COUNT` | `8` | `generate_content.py` |
 | `GCP_PROJECT_ID` | `agentic-learning-app-e13cb` | `embed_content.py` |
@@ -219,8 +244,11 @@ Settings are loaded from `../.env` via `config.py` (pydantic-settings, `extra="i
 |---|---|
 | `courses/linux-basics/outlines.yaml` | Lesson titles, objectives, concepts, examples (29 lessons) |
 | `courses/linux-basics/concept_map.json` | Per-lesson `introduces[]`, `assumes[]`, `generation_note`, `cross_lesson_flag` |
-| `courses/linux-basics/prompts/lesson_generation.md` | Lesson schema and quality rules sent to Gemini |
-| `courses/linux-basics/prompts/quiz_generation.md` | Quiz schema and quality rules sent to Gemini |
+| `courses/linux-basics/prompts/combined_generation.md` | Combined generation prompt template with `{{TOKEN}}` placeholders — single source of truth |
+| `courses/linux-basics/prompts/lesson_generation.md` | Lesson schema and quality rules (embedded into `combined_generation.md` at runtime) |
+| `courses/linux-basics/prompts/quiz_generation.md` | Quiz schema and quality rules (embedded into `combined_generation.md` at runtime) |
+| `courses/linux-basics/prompts/lesson_review.md` | Blocking review criteria for lesson content |
+| `courses/linux-basics/prompts/quiz_review.md` | Blocking review criteria for quiz content |
 
 ## Infra files
 
