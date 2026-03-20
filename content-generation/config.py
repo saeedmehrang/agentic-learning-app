@@ -21,5 +21,11 @@ class ContentSettings(BaseSettings):
     concurrency_limit: int = 5
     question_count: int = 8
 
+    # Vertex AI (embeddings)
+    gcp_project_id: str = "agentic-learning-app-e13cb"
+    gcp_location: str = "us-central1"
+    embedding_model: str = "text-embedding-005"
+    embedding_concurrency_limit: int = 5
+
 
 settings = ContentSettings()

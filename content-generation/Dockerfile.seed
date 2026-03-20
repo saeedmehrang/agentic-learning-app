@@ -1,0 +1,28 @@
+# Dockerfile.seed
+# Cloud Run Job image for seeding Cloud SQL with embedded lesson content.
+#
+# Build context must be the repo root:
+#   gcloud builds submit \
+#     --tag us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/content-seed:latest \
+#     --dockerfile content-generation/Dockerfile.seed \
+#     .
+#
+# The image connects to Cloud SQL via the Cloud SQL Python Connector (TLS tunnel
+# through the Cloud SQL Admin API) — no VPC connector or public IP required.
+
+FROM python:3.13-slim
+
+WORKDIR /app
+
+# Install dependencies first for layer caching
+COPY content-generation/requirements-seed.txt .
+RUN pip install --no-cache-dir -r requirements-seed.txt
+
+# Copy seed script and shared config
+COPY content-generation/seed_db.py content-generation/config.py ./
+
+# Copy course source files (outlines.yaml for module_id lookup,
+# and the pipeline/embedded/ directory with embedded JSON files)
+COPY courses/ /app/courses/
+
+ENTRYPOINT ["python", "seed_db.py"]
