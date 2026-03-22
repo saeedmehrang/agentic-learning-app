@@ -60,7 +60,7 @@ resource "google_sql_database_instance" "learning_app" {
     edition = "ENTERPRISE"  # PostgreSQL 16+ defaults to Enterprise Plus via API — force Enterprise to avoid ~3× cost increase
 
     ip_configuration {
-      ipv4_enabled    = false # No public IP — private VPC only
+      ipv4_enabled    = true  # Public IP required for Cloud SQL Auth Proxy from devcontainer/CI (no VPC routing). Cost: $0 extra. IAM enforces access.
       private_network = "projects/${var.project_id}/global/networks/default"
     }
 

@@ -2,8 +2,7 @@
 # apply_schema.sh
 # Applies a SQL migration file to the learning_app Cloud SQL database.
 #
-# The Cloud SQL instance has no public IP, so this script uses `gcloud sql connect`
-# which tunnels through the Cloud SQL Admin API — no direct VPC access required.
+# Uses `gcloud sql connect` which starts its own Cloud SQL Auth Proxy internally.
 #
 # Prerequisites:
 #   - gcloud CLI authenticated: gcloud auth login
@@ -16,8 +15,12 @@
 #
 # Defaults to infra/sql/001_create_schema.sql if --file is not specified.
 #
-# Recommended: run from Cloud Shell (https://shell.cloud.google.com) where
-# gcloud and psql are pre-installed and IAM auth is automatic.
+# NOTE: This script starts its own proxy internally. If you already have
+# cloud-sql-proxy running on port 5432, use psql directly instead to avoid conflicts:
+#
+#   SECRET=$(gcloud secrets versions access latest --secret="DB_PASSWORD" --project=agentic-learning-app-e13cb)
+#   PGPASSWORD="$SECRET" psql --host=127.0.0.1 --port=5432 \
+#     --username=app_user --dbname=learning_app --file=infra/sql/001_create_schema.sql
 
 set -euo pipefail
 
