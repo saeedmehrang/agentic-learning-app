@@ -223,6 +223,7 @@ def generation_config() -> genai_types.GenerateContentConfig:
         max_output_tokens=settings.generation_max_output_tokens,
         response_mime_type=_RESPONSE_MIME_TYPE,
         thinking_config=_thinking_config(settings.gemini_model, settings.generation_thinking_level),
+        automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
     )
 
 
@@ -233,6 +234,7 @@ def reviewer_config() -> genai_types.GenerateContentConfig:
         max_output_tokens=settings.reviewer_max_output_tokens,
         response_mime_type=_RESPONSE_MIME_TYPE,
         thinking_config=_thinking_config(settings.reviewer_model, settings.reviewer_thinking_level),
+        automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
     )
 
 
@@ -278,7 +280,7 @@ Return a single JSON object with exactly these top-level keys:
 Do not include a "passed" field — it will be computed from your issues.
 """
     async with semaphore:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(
             None,
             lambda: client.models.generate_content(
@@ -344,7 +346,7 @@ PREVIOUS GENERATION (for reference):
     regen_prompt = base_prompt + revision_section
 
     async with semaphore:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(
             None,
             lambda: client.models.generate_content(
@@ -424,7 +426,7 @@ async def generate_one(
         prompt = build_prompt(context, combined_template, lesson_prompt_template, quiz_prompt_template)
         async with semaphore:
             try:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 response = await loop.run_in_executor(
                     None,
                     lambda: client.models.generate_content(
@@ -679,7 +681,7 @@ def main() -> None:
     args = parse_args()
 
     if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
+        logging.getLogger(__name__).setLevel(logging.DEBUG)
 
     # Load source data
     try:
