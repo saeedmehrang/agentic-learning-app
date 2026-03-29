@@ -21,7 +21,7 @@ class ContentSettings(BaseSettings):
     # Reviewer LLM
     reviewer_model: str = "gemini-3-flash-preview"
     reviewer_temperature: float = 0.2
-    reviewer_max_output_tokens: int = 2048
+    reviewer_max_output_tokens: int = 8192
     reviewer_thinking_level: str | None = "medium"  # Gemini 3 series only: minimal | low | medium | high
 
     # Pipeline behaviour
