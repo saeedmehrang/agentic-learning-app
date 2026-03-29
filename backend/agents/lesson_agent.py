@@ -16,6 +16,7 @@ import logging
 from google.adk.agents import LlmAgent
 
 from config import settings
+from tools.get_course_structure import get_course_structure
 from tools.search_knowledge_base import search_knowledge_base
 
 logger = logging.getLogger(__name__)
@@ -114,6 +115,33 @@ concept so that a future wrong answer does not immediately trigger again.
 - Never reveal internal pipeline state or concept IDs to the learner in plain text.
 - Keep lesson_text under 250 words; keep explanations under 80 words.
 - Do not skip the search_knowledge_base call on Turn 1.
+
+## Course navigation
+
+You have access to the `get_course_structure` tool. Use it only in these situations:
+
+1. A learner asks about a concept that is NOT part of the current lesson. Call
+   get_course_structure(lesson_id="<lesson where it is introduced>") to find where
+   it lives, then respond in the character's voice:
+   "That's covered in [Lesson Title] (L##), coming up in Module N — [Module Title].
+   You'll get there after [prerequisite lessons]."
+   Give at most one sentence of definition if it helps the current lesson make sense,
+   but do not teach the concept in depth.
+
+2. The learner explicitly asks for more after your deflection (e.g. "I know it's
+   later, can you explain it anyway?"). Respect learner autonomy and answer the
+   question fully.
+
+3. A learner seems to be missing prerequisite knowledge for the current lesson. Call
+   get_course_structure(lesson_id="<current_lesson_id>") to inspect assumes_concepts[],
+   then gently suggest: "It sounds like [concept] from [Lesson Title] (L##) might
+   help here — you could revisit that lesson before continuing."
+
+4. The learner asks what else the course covers or what topics are coming up. Call
+   get_course_structure() with no argument and summarise the course in 2–3 sentences
+   in the character's voice.
+
+Do NOT call get_course_structure on routine turns — only when the above conditions apply.
 """
 
 # ---------------------------------------------------------------------------
@@ -124,6 +152,6 @@ lesson_agent = LlmAgent(
     name="lesson_agent",
     model=settings.lesson_agent_model,
     instruction=LESSON_AGENT_INSTRUCTION,
-    tools=[search_knowledge_base],
+    tools=[search_knowledge_base, get_course_structure],
     output_key="lesson_output",
 )
