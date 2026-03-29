@@ -99,3 +99,36 @@ resource "google_secret_manager_secret_iam_member" "sa_db_connection_name" {
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.cloud_run_sa.email}"
 }
+
+# ---------------------------------------------------------------------------
+# GCS pipeline bucket — stores all intermediate content generation outputs:
+# generated/, reviewed/, approved/, embedded/, pipeline_log.json
+# Survives Cloud Run job completion/crashes; enables --resume across invocations.
+# ---------------------------------------------------------------------------
+
+resource "google_storage_bucket" "pipeline" {
+  name                        = "agentic-learning-pipeline"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  force_destroy               = true # dev: allow bucket deletion without emptying first
+
+  lifecycle_rule {
+    condition {
+      age = 90 # days — auto-delete old pipeline artifacts
+    }
+    action {
+      type = "Delete"
+    }
+  }
+}
+
+resource "google_storage_bucket_iam_member" "pipeline_sa_admin" {
+  bucket = google_storage_bucket.pipeline.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.cloud_run_sa.email}"
+}
+
+output "pipeline_bucket_name" {
+  description = "GCS bucket for content generation pipeline outputs"
+  value       = google_storage_bucket.pipeline.name
+}

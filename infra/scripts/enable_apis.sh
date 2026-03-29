@@ -14,6 +14,7 @@ gcloud services enable \
     generativelanguage.googleapis.com \
     secretmanager.googleapis.com \
     artifactregistry.googleapis.com \
+    storage.googleapis.com \
     firestore.googleapis.com \
     identitytoolkit.googleapis.com \
     firebase.googleapis.com \
