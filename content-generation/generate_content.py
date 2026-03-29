@@ -34,6 +34,7 @@ import yaml
 
 from config import settings
 from review_models import ReviewResult
+from storage import StorageBackend, get_storage_backend
 from token_usage_log import PipelineLogger
 
 # ---------------------------------------------------------------------------
@@ -79,9 +80,9 @@ LESSON_REVIEW_PROMPT_PATH = (
 QUIZ_REVIEW_PROMPT_PATH = (
     REPO_ROOT / "courses" / "linux-basics" / "prompts" / "quiz_review.md"
 )
-OUTPUT_DIR = REPO_ROOT / "courses" / "linux-basics" / "pipeline" / "generated"
-REVIEWED_DIR = REPO_ROOT / "courses" / "linux-basics" / "pipeline" / "reviewed"
-APPROVED_DIR = REPO_ROOT / "courses" / "linux-basics" / "pipeline" / "approved"
+# Pipeline file I/O is routed through a storage backend.
+# Set GCS_PIPELINE_BUCKET env var to use GCS; leave unset for local filesystem.
+storage: StorageBackend = get_storage_backend()
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -464,19 +465,19 @@ async def generate_one(
     """
     lesson_id: str = lesson_outline["lesson_id"]
     tier_slug = TIER_FILENAME[tier]
-    generated_path = OUTPUT_DIR / tier_slug / f"{lesson_id}.json"
-    reviewed_path = REVIEWED_DIR / tier_slug / f"{lesson_id}_review.json"
-    approved_path = APPROVED_DIR / tier_slug / f"{lesson_id}.json"
+    generated_rel = f"pipeline/generated/{tier_slug}/{lesson_id}.json"
+    reviewed_rel = f"pipeline/reviewed/{tier_slug}/{lesson_id}_review.json"
+    approved_rel = f"pipeline/approved/{tier_slug}/{lesson_id}.json"
     label = f"[{lesson_id} {tier}]"
 
     # Resume: skip if approved output already exists
-    if resume and approved_path.exists():
+    if resume and storage.exists(approved_rel):
         logger.info(f"{label} Skipped (already approved)")
         await usage_logger.update_progress(lesson_id, tier, "skipped")
         return lesson_id, tier, "skipped"
 
     if dry_run:
-        logger.info(f"{label} Would generate -> {tier_slug}/{approved_path.name}")
+        logger.info(f"{label} Would generate -> {approved_rel}")
         return lesson_id, tier, "skipped"
 
     logger.info(f"{label} Generating...")
@@ -485,10 +486,10 @@ async def generate_one(
     context = build_context(lesson_outline, concept_map, tier)
 
     # --- Phase 1: Generate (or load from generated/ if partial resume) ---
-    if resume and generated_path.exists():
+    if resume and storage.exists(generated_rel):
         logger.info(f"{label} Loading existing generated content...")
         try:
-            raw_data: dict[str, Any] = json.loads(generated_path.read_text(encoding="utf-8"))
+            raw_data: dict[str, Any] = storage.read_json(generated_rel)
         except Exception as exc:
             logger.error(f"{label} Failed to load generated file: {exc}")
             await usage_logger.update_progress(lesson_id, tier, "failed", error=f"Load error: {exc}")
@@ -517,7 +518,7 @@ async def generate_one(
             except Exception as exc:
                 elapsed = time.monotonic() - start
                 logger.error(f"{label} FAILED ({elapsed:.1f}s): {exc}")
-                _write_error(generated_path, f"API error: {exc}", "")
+                _write_error(generated_rel, f"API error: {exc}", "")
                 await usage_logger.update_progress(lesson_id, tier, "failed", error=f"API error: {exc}")
                 return lesson_id, tier, "failed"
 
@@ -526,7 +527,7 @@ async def generate_one(
         except json.JSONDecodeError as exc:
             elapsed = time.monotonic() - start
             logger.error(f"{label} FAILED ({elapsed:.1f}s): Invalid JSON — {exc}")
-            _write_error(generated_path, f"JSON decode error: {exc}", raw_text)
+            _write_error(generated_rel, f"JSON decode error: {exc}", raw_text)
             await usage_logger.update_progress(lesson_id, tier, "failed", error=f"JSON decode error: {exc}")
             return lesson_id, tier, "failed"
 
@@ -534,7 +535,7 @@ async def generate_one(
             elapsed = time.monotonic() - start
             msg = f'Response missing "lesson" or "quiz" key. Keys found: {list(raw_data.keys())}'
             logger.error(f"{label} FAILED ({elapsed:.1f}s): {msg}")
-            _write_error(generated_path, msg, raw_text)
+            _write_error(generated_rel, msg, raw_text)
             await usage_logger.update_progress(lesson_id, tier, "failed", error=msg)
             return lesson_id, tier, "failed"
 
@@ -545,8 +546,7 @@ async def generate_one(
             "quiz": raw_data["quiz"],
         }
         try:
-            with generated_path.open("w", encoding="utf-8") as f:
-                json.dump(generated_output, f, indent=2, ensure_ascii=False)
+            storage.write_json(generated_rel, generated_output)
         except OSError as exc:
             elapsed = time.monotonic() - start
             logger.error(f"{label} FAILED ({elapsed:.1f}s): Could not write generated file — {exc}")
@@ -580,8 +580,7 @@ async def generate_one(
     )
 
     try:
-        with reviewed_path.open("w", encoding="utf-8") as f:
-            json.dump(review_result.model_dump(), f, indent=2, ensure_ascii=False)
+        storage.write_json(reviewed_rel, review_result.model_dump())
     except OSError as exc:
         logger.warning(f"{label} Could not write review file: {exc}")
 
@@ -632,8 +631,7 @@ async def generate_one(
 
     # --- Phase 4: Write approved output ---
     try:
-        with approved_path.open("w", encoding="utf-8") as f:
-            json.dump(final, f, indent=2, ensure_ascii=False)
+        storage.write_json(approved_rel, final)
     except OSError as exc:
         elapsed = time.monotonic() - start
         logger.error(f"{label} FAILED ({elapsed:.1f}s): Could not write approved file — {exc}")
@@ -651,16 +649,15 @@ async def generate_one(
     return lesson_id, tier, status
 
 
-def _write_error(output_path: Path, message: str, raw_response: str) -> None:
-    """Write an error file alongside the expected output path."""
-    error_path = output_path.with_suffix(".error")
+def _write_error(rel_path: str, message: str, raw_response: str) -> None:
+    """Write an error file alongside the expected output path. Best-effort."""
+    error_rel = rel_path.replace(".json", ".error")
     try:
-        with error_path.open("w", encoding="utf-8") as f:
-            f.write(f"Error: {message}\n\n")
-            if raw_response:
-                f.write("=== Raw API Response ===\n")
-                f.write(raw_response)
-    except OSError:
+        content = f"Error: {message}\n\n"
+        if raw_response:
+            content += "=== Raw API Response ===\n" + raw_response
+        storage.write_text(error_rel, content)
+    except Exception:
         pass  # Best-effort; don't mask the original error
 
 
@@ -685,11 +682,6 @@ async def run_pipeline(
         client = make_client()
     else:
         client = None  # type: ignore[assignment]
-
-    for tier_slug in TIER_FILENAME.values():
-        (OUTPUT_DIR / tier_slug).mkdir(parents=True, exist_ok=True)
-        (REVIEWED_DIR / tier_slug).mkdir(parents=True, exist_ok=True)
-        (APPROVED_DIR / tier_slug).mkdir(parents=True, exist_ok=True)
 
     semaphore = asyncio.Semaphore(settings.concurrency_limit)
     usage_logger = PipelineLogger()

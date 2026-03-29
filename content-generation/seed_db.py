@@ -38,6 +38,8 @@ import yaml
 from google.cloud.sql.connector import Connector
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from storage import StorageBackend, get_storage_backend
+
 # ---------------------------------------------------------------------------
 # Path resolution
 # ---------------------------------------------------------------------------
@@ -46,7 +48,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 
 OUTLINES_PATH = REPO_ROOT / "courses" / "linux-basics" / "outlines.yaml"
-EMBEDDED_DIR = REPO_ROOT / "courses" / "linux-basics" / "pipeline" / "embedded"
+
+# Pipeline file I/O is routed through a storage backend.
+# Set GCS_PIPELINE_BUCKET env var to use GCS; leave unset for local filesystem.
+storage: StorageBackend = get_storage_backend()
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -118,14 +123,14 @@ def load_outlines(path: Path) -> dict[str, dict[str, Any]]:
     }
 
 
-def load_embedded_files(embedded_dir: Path) -> list[Path]:
-    """Return sorted list of embedded JSON files."""
-    if not embedded_dir.exists():
-        logger.error(f"Embedded directory not found: {embedded_dir}")
-        sys.exit(1)
-    files = sorted(embedded_dir.glob("*.json"))
+def load_embedded_files() -> list[str]:
+    """Return sorted list of embedded relative paths from storage."""
+    files = storage.list_prefix("pipeline/embedded/")
     if not files:
-        logger.error(f"No embedded JSON files found in {embedded_dir}")
+        logger.error(
+            "No embedded JSON files found under pipeline/embedded/.\n"
+            "Run embed_content.py first to populate pipeline/embedded/."
+        )
         sys.exit(1)
     return files
 
@@ -279,20 +284,21 @@ def seed_quiz_question(
 
 def seed_file(
     conn: pg8000.native.Connection,
-    file_path: Path,
+    rel_path: str,
     outlines_lookup: dict[str, dict[str, Any]],
     dry_run: bool,
 ) -> tuple[str, str]:
     """
     Process one embedded JSON file. Returns (lesson_id, status).
     status is "seeded" | "skipped" | "failed".
+    rel_path is a relative path like "pipeline/embedded/beginner/L04.json".
     """
+    stem = rel_path.split("/")[-1].replace(".json", "")
     try:
-        with file_path.open("r", encoding="utf-8") as f:
-            data: dict[str, Any] = json.load(f)
+        data: dict[str, Any] = storage.read_json(rel_path)
     except Exception as exc:
-        logger.error(f"[{file_path.stem}] FAILED: Could not read file — {exc}")
-        return file_path.stem, "failed"
+        logger.error(f"[{stem}] FAILED: Could not read file — {exc}")
+        return stem, "failed"
 
     lesson_id: str = data.get("lesson_id", "")
     tier_slug: str = data.get("tier", "")
@@ -340,21 +346,21 @@ def run_seed(dry_run: bool) -> None:
         logger.error(f"Failed to load outlines: {exc}")
         sys.exit(1)
 
-    files = load_embedded_files(EMBEDDED_DIR)
+    files = load_embedded_files()
     logger.info(f"Seeding {len(files)} embedded file(s) into Cloud SQL...")
 
     if dry_run:
         logger.info("Dry-run mode: no database writes.")
-        for f in files:
+        for rel_path in files:
+            stem = rel_path.split("/")[-1].replace(".json", "")
             try:
-                with f.open("r", encoding="utf-8") as fh:
-                    data = json.load(fh)
-                lesson_id = data.get("lesson_id", f.stem)
+                data = storage.read_json(rel_path)
+                lesson_id = data.get("lesson_id", stem)
                 tier_slug = data.get("tier", "")
                 q_count = len(data.get("quiz_questions", []))
                 logger.info(f"[{lesson_id} {tier_slug}] Would seed — 1 chunk + {q_count} question(s)")
             except Exception as exc:
-                logger.error(f"[{f.stem}] FAILED: {exc}")
+                logger.error(f"[{stem}] FAILED: {exc}")
         return
 
     if not seed_settings.db_instance_connection_name:
@@ -374,8 +380,8 @@ def run_seed(dry_run: bool) -> None:
     try:
         conn = get_connection(connector)
         counts: dict[str, int] = {"seeded": 0, "skipped": 0, "failed": 0}
-        for f in files:
-            _, status = seed_file(conn, f, outlines_lookup, dry_run=False)
+        for rel_path in files:
+            _, status = seed_file(conn, rel_path, outlines_lookup, dry_run=False)
             counts[status] = counts.get(status, 0) + 1
         conn.close()
     finally:

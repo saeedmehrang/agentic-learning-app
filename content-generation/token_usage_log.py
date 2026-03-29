@@ -1,7 +1,8 @@
 """
 token_usage_log.py — Async-safe JSON logger for pipeline progress and Gemini token usage.
 
-Writes to courses/linux-basics/pipeline/pipeline_log.json with two top-level sections:
+Writes to pipeline/pipeline_log.json (via StorageBackend — local or GCS) with two
+top-level sections:
 
   "progress"    — one record per lesson × tier combination, updated in-place as the
                   combination moves through the pipeline phases.
@@ -44,21 +45,18 @@ Importable API
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Optional
 
 import google.genai.types as genai_types
 
+from storage import StorageBackend, get_storage_backend
+
 logger = logging.getLogger(__name__)
 
-_LOG_PATH = (
-    Path(__file__).resolve().parent.parent
-    / "courses" / "linux-basics" / "pipeline" / "pipeline_log.json"
-)
+_LOG_REL_PATH = "pipeline/pipeline_log.json"
 
 # Statuses that record a terminal timestamp into the progress entry.
 _TIMESTAMP_FIELD: dict[str, str] = {
@@ -77,25 +75,24 @@ def _empty_log() -> dict[str, Any]:
     return {"progress": {}, "token_usage": []}
 
 
-def _read_log(path: Path) -> dict[str, Any]:
+def _read_log(storage: StorageBackend) -> dict[str, Any]:
     """Read the log file, returning an empty structure if missing or corrupt."""
-    if not path.exists():
+    if not storage.exists(_LOG_REL_PATH):
         return _empty_log()
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = storage.read_json(_LOG_REL_PATH)
         if "progress" not in data or "token_usage" not in data:
             return _empty_log()
         return data
-    except (json.JSONDecodeError, OSError) as exc:
+    except Exception as exc:
         logger.warning("[pipeline_log] Could not read log file: %s — starting fresh.", exc)
         return _empty_log()
 
 
-def _write_log(path: Path, data: dict[str, Any]) -> None:
+def _write_log(storage: StorageBackend, data: dict[str, Any]) -> None:
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-    except OSError as exc:
+        storage.write_json(_LOG_REL_PATH, data)
+    except Exception as exc:
         logger.warning("[pipeline_log] Could not write log file: %s", exc)
 
 
@@ -132,9 +129,12 @@ class PipelineLogger:
     Async-safe: a single asyncio.Lock serialises all reads and writes to
     pipeline_log.json, which is safe for the concurrent asyncio tasks in
     generate_content.py.
+
+    Storage backend is auto-selected at construction time: GCS when
+    GCS_PIPELINE_BUCKET is set, local filesystem otherwise.
     """
 
-    log_path: Path = field(default_factory=lambda: _LOG_PATH)
+    _storage: StorageBackend = field(default_factory=get_storage_backend, init=False, repr=False)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
     _rows: list[_TokenUsageRow] = field(default_factory=list, init=False, repr=False)
 
@@ -194,9 +194,9 @@ class PipelineLogger:
 
     async def _append_token_usage(self, row: _TokenUsageRow) -> None:
         async with self._lock:
-            data = _read_log(self.log_path)
+            data = _read_log(self._storage)
             data["token_usage"].append(row.as_dict())
-            _write_log(self.log_path, data)
+            _write_log(self._storage, data)
 
     # ------------------------------------------------------------------
     # Progress tracking
@@ -220,7 +220,7 @@ class PipelineLogger:
         key = f"{lesson_id}_{tier.lower()}"
 
         async with self._lock:
-            data = _read_log(self.log_path)
+            data = _read_log(self._storage)
             entry: dict[str, Any] = data["progress"].get(key, {})
 
             entry["status"] = status
@@ -237,7 +237,7 @@ class PipelineLogger:
                 entry["blocking_issues"] = blocking_issues
 
             data["progress"][key] = entry
-            _write_log(self.log_path, data)
+            _write_log(self._storage, data)
 
     # ------------------------------------------------------------------
     # Session summary
@@ -283,5 +283,5 @@ class PipelineLogger:
             "candidates tokens:", totals["candidates_tokens"],
             "thoughts tokens:", totals["thoughts_tokens"],
             "total tokens:", totals["total_tokens"],
-            self.log_path,
+            self._storage.location + _LOG_REL_PATH,
         )

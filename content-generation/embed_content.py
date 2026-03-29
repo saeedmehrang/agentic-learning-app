@@ -28,6 +28,7 @@ import vertexai
 from vertexai.language_models import TextEmbeddingInput, TextEmbeddingModel
 
 from config import settings
+from storage import StorageBackend, get_storage_backend
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -47,8 +48,9 @@ TIER_FILENAME: dict[str, str] = {
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 
-APPROVED_DIR = REPO_ROOT / "courses" / "linux-basics" / "pipeline" / "approved"
-EMBEDDED_DIR = REPO_ROOT / "courses" / "linux-basics" / "pipeline" / "embedded"
+# Pipeline file I/O is routed through a storage backend.
+# Set GCS_PIPELINE_BUCKET env var to use GCS; leave unset for local filesystem.
+storage: StorageBackend = get_storage_backend()
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -138,37 +140,38 @@ def extract_quiz_questions(quiz: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 async def embed_one(
-    file_path: Path,
+    approved_rel: str,
     model: TextEmbeddingModel,
     semaphore: asyncio.Semaphore,
-    output_dir: Path,
     dry_run: bool,
     resume: bool,
 ) -> tuple[str, str, str]:
     """
     Embed the lesson content for a single approved JSON file.
 
+    approved_rel is a relative path like "pipeline/approved/beginner/L04.json".
     Returns (lesson_id, tier_slug, status) where status is one of:
     "embedded", "skipped", "failed".
     """
-    # file_path is approved/{tier_slug}/{lesson_id}.json
-    tier_slug = file_path.parent.name
-    lesson_id_stem = file_path.stem  # e.g. "L04"
+    # Parse tier_slug and lesson_id from the relative path
+    # Structure: pipeline/approved/{tier_slug}/{lesson_id}.json
+    parts = approved_rel.split("/")
+    tier_slug = parts[-2]
+    lesson_id_stem = parts[-1].replace(".json", "")
     label = f"[{lesson_id_stem} {tier_slug}]"
-    output_path = output_dir / tier_slug / file_path.name
+    embedded_rel = f"pipeline/embedded/{tier_slug}/{lesson_id_stem}.json"
 
-    if resume and output_path.exists():
+    if resume and storage.exists(embedded_rel):
         logger.info(f"{label} Skipped (already exists)")
         return lesson_id_stem, tier_slug, "skipped"
 
     if dry_run:
-        logger.info(f"{label} Would embed -> {tier_slug}/{file_path.name}")
+        logger.info(f"{label} Would embed -> {tier_slug}/{lesson_id_stem}.json")
         return lesson_id_stem, tier_slug, "skipped"
 
     # Load approved JSON
     try:
-        with file_path.open("r", encoding="utf-8") as f:
-            data: dict[str, Any] = json.load(f)
+        data: dict[str, Any] = storage.read_json(approved_rel)
     except Exception as exc:
         logger.error(f"{label} FAILED: Could not read input — {exc}")
         return lesson_id_stem, tier_slug, "failed"
@@ -225,10 +228,8 @@ async def embed_one(
         },
     }
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with output_path.open("w", encoding="utf-8") as f:
-            json.dump(output, f, indent=2, ensure_ascii=False)
+        storage.write_json(embedded_rel, output)
     except OSError as exc:
         elapsed = time.monotonic() - start
         logger.error(f"{label} FAILED ({elapsed:.1f}s): Could not write output — {exc}")
@@ -244,27 +245,24 @@ async def embed_one(
 
 
 async def run_pipeline(
-    files: list[Path],
+    files: list[str],
     dry_run: bool,
     resume: bool,
 ) -> None:
-    """Run the embedding pipeline over the given approved files."""
+    """Run the embedding pipeline over the given approved relative paths."""
     if not dry_run:
         configure_vertexai()
         model = get_embedding_model()
     else:
         model = None  # type: ignore[assignment]
 
-    EMBEDDED_DIR.mkdir(parents=True, exist_ok=True)
-
     semaphore = asyncio.Semaphore(settings.embedding_concurrency_limit)
 
     tasks = [
         embed_one(
-            file_path=f,
+            approved_rel=f,
             model=model,
             semaphore=semaphore,
-            output_dir=EMBEDDED_DIR,
             dry_run=dry_run,
             resume=resume,
         )
@@ -319,28 +317,25 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def collect_approved_files(lesson_filter: str | None, tier_filter: str | None) -> list[Path]:
+def collect_approved_files(lesson_filter: str | None, tier_filter: str | None) -> list[str]:
     """
-    Return the list of approved JSON files to embed, applying lesson/tier filters.
-    Files are expected at: approved/{tier_slug}/{lesson_id}.json
+    Return the list of approved relative paths to embed, applying lesson/tier filters.
+    Paths have the form: "pipeline/approved/{tier_slug}/{lesson_id}.json"
     """
-    if not APPROVED_DIR.exists():
+    all_files = storage.list_prefix("pipeline/approved/")
+    if not all_files:
         logger.error(
-            f"Approved directory not found: {APPROVED_DIR}\n"
+            "No approved JSON files found under pipeline/approved/.\n"
             "Run generate_content.py first to populate pipeline/approved/."
         )
         sys.exit(1)
 
-    all_files = sorted(APPROVED_DIR.glob("*/*.json"))
-    if not all_files:
-        logger.error(f"No JSON files found in {APPROVED_DIR}")
-        sys.exit(1)
-
-    filtered: list[Path] = []
-    for f in all_files:
-        # Structure: approved/{tier_slug}/{lesson_id}.json
-        file_tier_slug = f.parent.name.lower()
-        file_lesson_id = f.stem.upper()
+    filtered: list[str] = []
+    for rel_path in all_files:
+        # Structure: pipeline/approved/{tier_slug}/{lesson_id}.json
+        parts = rel_path.split("/")
+        file_tier_slug = parts[-2].lower()
+        file_lesson_id = parts[-1].replace(".json", "").upper()
 
         if lesson_filter and file_lesson_id != lesson_filter.upper():
             continue
@@ -350,7 +345,7 @@ def collect_approved_files(lesson_filter: str | None, tier_filter: str | None) -
             if file_tier_slug != expected_slug:
                 continue
 
-        filtered.append(f)
+        filtered.append(rel_path)
 
     if not filtered:
         logger.error("No files matched the specified filters.")
@@ -367,7 +362,8 @@ def main() -> None:
     logger.info(
         f"Embedding pipeline starting — {len(files)} file(s), "
         f"model={settings.embedding_model}, "
-        f"concurrency={settings.embedding_concurrency_limit}, mode={mode}"
+        f"concurrency={settings.embedding_concurrency_limit}, mode={mode}, "
+        f"storage={storage.location}"
     )
     if args.resume:
         logger.info("Resume mode: existing embedded files will be skipped.")
