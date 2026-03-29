@@ -34,5 +34,9 @@ class ContentSettings(BaseSettings):
     embedding_model: str = "text-embedding-005"
     embedding_concurrency_limit: int = 5
 
+    # Storage backend — set GCS_PIPELINE_BUCKET to route all pipeline I/O through GCS.
+    # Leave empty (default) to use the local filesystem under courses/linux-basics/pipeline/.
+    gcs_pipeline_bucket: str = ""
+
 
 settings = ContentSettings()

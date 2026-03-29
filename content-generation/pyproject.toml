@@ -13,6 +13,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# GCS backend — required when GCS_PIPELINE_BUCKET is set (i.e. on Cloud Run).
+# Not needed for local development.
+gcs = [
+    "google-cloud-storage>=2.0",
+]
 # Extra deps for seed_db.py (Cloud SQL connector + pg8000 driver).
 # Not needed for generate_content.py or embed_content.py.
 seed = [
