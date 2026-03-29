@@ -11,6 +11,7 @@ gcloud services enable \
     run.googleapis.com \
     sqladmin.googleapis.com \
     aiplatform.googleapis.com \
+    generativelanguage.googleapis.com \
     secretmanager.googleapis.com \
     artifactregistry.googleapis.com \
     firestore.googleapis.com \
