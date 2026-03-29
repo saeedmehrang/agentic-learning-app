@@ -14,9 +14,9 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# Install dependencies first for layer caching
-COPY content-generation/requirements-seed.txt .
-RUN pip install --no-cache-dir -r requirements-seed.txt
+# Install seed dependencies from pyproject.toml [seed] extras
+COPY content-generation/pyproject.toml .
+RUN pip install --no-cache-dir ".[seed]"
 
 # Copy seed script and shared config
 COPY content-generation/seed_db.py content-generation/config.py ./

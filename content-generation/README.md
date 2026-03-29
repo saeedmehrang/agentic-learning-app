@@ -42,16 +42,21 @@ The `pipeline/` directory is gitignored and created at runtime.
 
 ## Setup
 
-```bash
-# For generate_content.py and embed_content.py
-uv venv content-generation/.venv
-source content-generation/.venv/bin/activate
-uv pip install -r content-generation/requirements.txt
-```
+`pyproject.toml` is the single source of truth for dependencies. There are no `requirements*.txt` files — do not create them.
 
 ```bash
-# For seed_db.py (local testing only — production runs as a Cloud Run Job)
-uv pip install -r content-generation/requirements-seed.txt
+cd content-generation
+uv venv .venv
+source .venv/bin/activate
+
+# generate_content.py and embed_content.py
+uv pip install -e .
+
+# seed_db.py also needs the Cloud SQL connector (local testing only)
+uv pip install -e ".[seed]"
+
+# tests (installs dev dependency-group via uv)
+uv sync --group dev
 ```
 
 Requires GCP Application Default Credentials (ADC) in the environment:
@@ -304,4 +309,4 @@ Settings are loaded from `../.env` via `config.py` (pydantic-settings, `extra="i
 | `infra/scripts/apply_schema.sh` | Applies DDL to Cloud SQL via `gcloud sql connect` |
 | `infra/scripts/enable_pgvector.sh` | Enables the pgvector extension (must run before `apply_schema.sh`) |
 | `content-generation/Dockerfile.seed` | Cloud Run Job image for `seed_db.py` (build context = repo root) |
-| `content-generation/requirements-seed.txt` | Dependencies for `seed_db.py` only (pg8000 + Cloud SQL Connector) |
+| `content-generation/pyproject.toml` | Single source of truth for all dependencies; `[seed]` extras for `seed_db.py` |
