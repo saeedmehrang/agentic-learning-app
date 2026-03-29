@@ -1,15 +1,32 @@
 """
 token_usage_log.py — Thread-safe CSV logger for Gemini API token usage.
 
-Each API call appends one row to token_usage.csv in the content-generation
-directory. Designed to be imported and used from generate_content.py.
+Each API call appends one row to courses/linux-basics/pipeline/token_usage.csv.
+Token counts come directly from the Gemini API response (response.usage_metadata),
+so they are exact — not estimates.
+
+CSV columns
+-----------
+timestamp_utc           ISO-8601 timestamp of the API call (UTC).
+call_type               One of: generate | review | regenerate.
+lesson_id               Lesson identifier, e.g. "L01".
+tier                    Difficulty tier: Beginner | Intermediate | Advanced.
+model                   Gemini model name used for this call.
+max_output_tokens_config  The max_output_tokens value set in config for this call type.
+                          Useful for spotting calls where the output was likely truncated
+                          (candidates_tokens ≈ max_output_tokens_config).
+prompt_tokens           Tokens consumed by the input prompt (including any cached content).
+candidates_tokens       Tokens in the model's output (the generated JSON).
+thoughts_tokens         Tokens used by the model's internal reasoning (Gemini 3.x thinking
+                        mode only; 0 for models that do not support thinking).
+total_tokens            Sum of prompt + candidates + thoughts tokens for the full call.
 
 Importable API
 --------------
     from token_usage_log import TokenUsageLogger
 
-    logger = TokenUsageLogger()                    # uses default path
-    logger.record(
+    usage_logger = TokenUsageLogger()             # uses default path
+    usage_logger.record(
         call_type="generate",
         lesson_id="L01",
         tier="Beginner",
@@ -17,7 +34,7 @@ Importable API
         max_output_tokens=settings.generation_max_output_tokens,
         usage_metadata=response.usage_metadata,
     )
-    logger.print_session_summary()
+    usage_logger.print_session_summary()
 """
 
 from __future__ import annotations

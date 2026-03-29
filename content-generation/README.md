@@ -80,6 +80,7 @@ python content-generation/generate_content.py [options]
 | `--lesson L04 --tier Beginner` | Generate exactly one combination |
 | `--dry-run` | Print what would be generated without calling the API |
 | `--resume` | Skip combinations where the output file already exists |
+| `--verbose` | Enable DEBUG logging, including per-call token usage printed to stdout |
 
 **Output:** Up to three files per combination:
 
@@ -115,6 +116,43 @@ Each review file shape:
 ```
 
 **Per combination, up to 3 LLM calls are made:** generate → review → regenerate (only if the reviewer found blocking issues). If review passes, `approved/` is written directly from the generated output.
+
+### Token usage logging
+
+Every API call is logged to `courses/linux-basics/pipeline/token_usage.csv` (created on first run). Token counts come directly from the Gemini API response and are exact.
+
+**Default behaviour (no `--verbose`):** each call is silently appended to the CSV. A session summary is printed at INFO level at the end of the run:
+
+```
+Token usage this session (2 API calls: 1 generate, 1 review)
+  prompt tokens:          3,412
+  candidates tokens:      1,851
+  thoughts tokens:          620
+  total tokens:           5,883
+  Logged to: .../courses/linux-basics/pipeline/token_usage.csv
+```
+
+**With `--verbose`:** additionally prints one DEBUG line per call as it completes:
+
+```
+[token_usage] L01 Beginner (generate) — prompt=2100, candidates=1851, thoughts=420, total=4371
+[token_usage] L01 Beginner (review)   — prompt=1312, candidates=480,  thoughts=200, total=1992
+```
+
+**CSV columns:**
+
+| Column | Description |
+|---|---|
+| `timestamp_utc` | ISO-8601 UTC timestamp of the call |
+| `call_type` | `generate`, `review`, or `regenerate` |
+| `lesson_id` | e.g. `L01` |
+| `tier` | `Beginner`, `Intermediate`, or `Advanced` |
+| `model` | Gemini model name used |
+| `max_output_tokens_config` | The token limit set in config for this call type — compare against `candidates_tokens` to spot truncation |
+| `prompt_tokens` | Tokens in the input prompt |
+| `candidates_tokens` | Tokens in the model's output |
+| `thoughts_tokens` | Reasoning tokens (Gemini 3.x thinking mode only; 0 otherwise) |
+| `total_tokens` | Sum of all token types for the call |
 
 **`--resume` behaviour:** skips combinations where `pipeline/approved/` already exists. If a file exists in `pipeline/generated/` but not `pipeline/approved/`, the generation step is skipped and only the review + optional regen are re-run — useful for updating reviewer prompts without regenerating all 87 combinations.
 
@@ -226,12 +264,12 @@ Settings are loaded from `../.env` via `config.py` (pydantic-settings, `extra="i
 
 | Setting | Default | Used by |
 |---|---|---|
-| `GEMINI_MODEL` | `gemini-2.0-flash` | `generate_content.py` |
+| `GEMINI_MODEL` | `gemini-3.1-flash-lite-preview` | `generate_content.py` |
 | `GENERATION_TEMPERATURE` | `0.7` | `generate_content.py` |
 | `GENERATION_MAX_OUTPUT_TOKENS` | `8192` | `generate_content.py` |
-| `REVIEWER_MODEL` | `gemini-3.1-flash-lite-preview` | `generate_content.py` |
+| `REVIEWER_MODEL` | `gemini-3-flash-preview` | `generate_content.py` |
 | `REVIEWER_TEMPERATURE` | `0.2` | `generate_content.py` |
-| `REVIEWER_MAX_OUTPUT_TOKENS` | `2048` | `generate_content.py` |
+| `REVIEWER_MAX_OUTPUT_TOKENS` | `8192` | `generate_content.py` |
 | `CONCURRENCY_LIMIT` | `5` | `generate_content.py` |
 | `QUESTION_COUNT` | `8` | `generate_content.py` |
 | `GCP_PROJECT_ID` | `agentic-learning-app-e13cb` | `embed_content.py` |
