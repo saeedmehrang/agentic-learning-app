@@ -1,6 +1,11 @@
 # Dockerfile.seed
 # Cloud Run Job image for seeding Cloud SQL with embedded lesson content.
 #
+# NOTE: The main Dockerfile installs all three pipelines in one image.
+# Use that image for new deployments — it supports generate, embed, and seed
+# by overriding the entrypoint. This file is kept for backwards compatibility
+# and minimal-footprint seed-only deployments.
+#
 # Build context must be the repo root:
 #   gcloud builds submit \
 #     --tag us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/content-seed:latest \
@@ -9,20 +14,27 @@
 #
 # The image connects to Cloud SQL via the Cloud SQL Python Connector (TLS tunnel
 # through the Cloud SQL Admin API) — no VPC connector or public IP required.
+#
+# Environment variables:
+#   GCS_PIPELINE_BUCKET          — GCS bucket containing pipeline/embedded/ files
+#   DB_PASSWORD                  — from Secret Manager binding
+#   DB_INSTANCE_CONNECTION_NAME  — from Secret Manager binding
 
 FROM python:3.13-slim
 
 WORKDIR /app
 
-# Install seed dependencies from pyproject.toml [seed] extras
+# Install seed + gcs dependencies
 COPY content-generation/pyproject.toml .
-RUN pip install --no-cache-dir ".[seed]"
+RUN pip install --no-cache-dir ".[gcs,seed]"
 
-# Copy seed script and shared config
-COPY content-generation/seed_db.py content-generation/config.py ./
+# Copy seed script, storage abstraction, and shared config
+COPY content-generation/seed_db.py \
+     content-generation/storage.py \
+     content-generation/config.py \
+     ./
 
-# Copy course source files (outlines.yaml for module_id lookup,
-# and the pipeline/embedded/ directory with embedded JSON files)
-COPY courses/ /app/courses/
+# Copy outlines.yaml for module_id lookup (not a pipeline output — static asset)
+COPY courses/linux-basics/outlines.yaml /app/courses/linux-basics/outlines.yaml
 
 ENTRYPOINT ["python", "seed_db.py"]
