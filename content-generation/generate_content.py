@@ -19,11 +19,13 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
+import google.api_core.exceptions
 import google.auth
 import google.auth.transport.requests
 import google.genai as genai
@@ -239,6 +241,75 @@ def reviewer_config() -> genai_types.GenerateContentConfig:
 
 
 # ---------------------------------------------------------------------------
+# Response helpers
+# ---------------------------------------------------------------------------
+
+_RETRYABLE_EXCEPTIONS = (
+    google.api_core.exceptions.ResourceExhausted,
+    google.api_core.exceptions.ServiceUnavailable,
+    google.api_core.exceptions.DeadlineExceeded,
+)
+_MAX_RETRIES = 3
+_RETRY_BASE_DELAY = 2.0
+
+
+def _extract_text(response: Any, label: str) -> str:
+    """Extract text from a Gemini response, raising ValueError if None."""
+    text = response.text
+    if text is None:
+        candidates = getattr(response, "candidates", None) or []
+        reason = candidates[0].finish_reason if candidates else "unknown"
+        raise ValueError(f"response.text is None (finish_reason={reason})")
+    return text
+
+
+def _strip_code_fence(text: str) -> str:
+    """Strip markdown code fences (```json ... ```) from model output."""
+    text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-z]*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text)
+    return text.strip()
+
+
+async def _call_with_retry(
+    fn: Any,
+    label: str,
+) -> Any:
+    """Call a synchronous callable in an executor with retries on transient errors."""
+    loop = asyncio.get_running_loop()
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            response = await loop.run_in_executor(None, fn)
+            if response.text is None:
+                candidates = getattr(response, "candidates", None) or []
+                reason = candidates[0].finish_reason if candidates else "unknown"
+                if attempt < _MAX_RETRIES:
+                    delay = _RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                    logger.warning(
+                        f"{label} response.text is None (finish_reason={reason}), "
+                        f"retry {attempt}/{_MAX_RETRIES - 1} in {delay:.0f}s"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                # Final attempt also returned None — fall through to post-loop raise
+                break
+            return response
+        except _RETRYABLE_EXCEPTIONS as exc:
+            if attempt < _MAX_RETRIES:
+                delay = _RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                logger.warning(
+                    f"{label} transient error ({type(exc).__name__}), "
+                    f"retry {attempt}/{_MAX_RETRIES - 1} in {delay:.0f}s: {exc}"
+                )
+                await asyncio.sleep(delay)
+            else:
+                raise
+    # Exhausted retries with None responses
+    raise ValueError(f"{label} response.text remained None after {_MAX_RETRIES} attempts")
+
+
+# ---------------------------------------------------------------------------
 # Reviewer and regenerator
 # ---------------------------------------------------------------------------
 
@@ -279,17 +350,17 @@ Return a single JSON object with exactly these top-level keys:
 
 Do not include a "passed" field — it will be computed from your issues.
 """
+    label = f"[{context['id']} {context['tier']}]"
     async with semaphore:
-        loop = asyncio.get_running_loop()
-        response = await loop.run_in_executor(
-            None,
+        response = await _call_with_retry(
             lambda: client.models.generate_content(
                 model=settings.reviewer_model,
                 contents=review_prompt,
                 config=reviewer_config(),
             ),
+            label=f"{label}[review]",
         )
-        raw_text: str = response.text
+        raw_text = _extract_text(response, f"{label}[review]")
         usage_logger.record(
             call_type="review",
             lesson_id=context["id"],
@@ -299,7 +370,7 @@ Do not include a "passed" field — it will be computed from your issues.
             usage_metadata=response.usage_metadata,
         )
 
-    data = json.loads(raw_text)
+    data = json.loads(_strip_code_fence(raw_text))
     result = ReviewResult.model_validate(data)
     result.compute_passed()
     return result
@@ -345,17 +416,17 @@ PREVIOUS GENERATION (for reference):
     base_prompt = build_prompt(context, combined_template, lesson_prompt_template, quiz_prompt_template)
     regen_prompt = base_prompt + revision_section
 
+    regen_label = f"[{context['id']} {context['tier']}][regen]"
     async with semaphore:
-        loop = asyncio.get_running_loop()
-        response = await loop.run_in_executor(
-            None,
+        response = await _call_with_retry(
             lambda: client.models.generate_content(
                 model=settings.gemini_model,
                 contents=regen_prompt,
                 config=generation_config(),
             ),
+            label=regen_label,
         )
-        raw_text: str = response.text
+        raw_text = _extract_text(response, regen_label)
         usage_logger.record(
             call_type="regenerate",
             lesson_id=context["id"],
@@ -365,7 +436,7 @@ PREVIOUS GENERATION (for reference):
             usage_metadata=response.usage_metadata,
         )
 
-    return json.loads(raw_text)
+    return json.loads(_strip_code_fence(raw_text))
 
 
 # ---------------------------------------------------------------------------
@@ -426,16 +497,15 @@ async def generate_one(
         prompt = build_prompt(context, combined_template, lesson_prompt_template, quiz_prompt_template)
         async with semaphore:
             try:
-                loop = asyncio.get_running_loop()
-                response = await loop.run_in_executor(
-                    None,
+                response = await _call_with_retry(
                     lambda: client.models.generate_content(
                         model=settings.gemini_model,
                         contents=prompt,
                         config=generation_config(),
                     ),
+                    label=label,
                 )
-                raw_text: str = response.text
+                raw_text: str = _extract_text(response, label)
                 usage_logger.record(
                     call_type="generate",
                     lesson_id=lesson_id,
@@ -451,7 +521,7 @@ async def generate_one(
                 return lesson_id, tier, "failed"
 
         try:
-            raw_data = json.loads(raw_text)
+            raw_data = json.loads(_strip_code_fence(raw_text))
         except json.JSONDecodeError as exc:
             elapsed = time.monotonic() - start
             logger.error(f"{label} FAILED ({elapsed:.1f}s): Invalid JSON — {exc}")
