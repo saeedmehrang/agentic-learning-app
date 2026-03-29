@@ -34,7 +34,7 @@ import yaml
 
 from config import settings
 from review_models import ReviewResult
-from token_usage_log import TokenUsageLogger
+from token_usage_log import PipelineLogger
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -320,7 +320,7 @@ async def call_reviewer(
     quiz_review_template: str,
     client: genai.Client,
     semaphore: asyncio.Semaphore,
-    usage_logger: TokenUsageLogger,
+    usage_logger: PipelineLogger,
 ) -> ReviewResult:
     """Call the reviewer LLM and return a structured ReviewResult."""
     review_prompt = f"""\
@@ -361,12 +361,11 @@ Do not include a "passed" field — it will be computed from your issues.
             label=f"{label}[review]",
         )
         raw_text = _extract_text(response, f"{label}[review]")
-        usage_logger.record(
+        usage_logger.record_token_usage(
             call_type="review",
             lesson_id=context["id"],
             tier=context["tier"],
             model=settings.reviewer_model,
-            max_output_tokens=settings.reviewer_max_output_tokens,
             usage_metadata=response.usage_metadata,
         )
 
@@ -385,7 +384,7 @@ async def call_regenerator(
     quiz_prompt_template: str,
     client: genai.Client,
     semaphore: asyncio.Semaphore,
-    usage_logger: TokenUsageLogger,
+    usage_logger: PipelineLogger,
 ) -> dict[str, Any]:
     """Regenerate content incorporating reviewer feedback on blocking issues."""
     blocking_lesson = [
@@ -427,12 +426,11 @@ PREVIOUS GENERATION (for reference):
             label=regen_label,
         )
         raw_text = _extract_text(response, regen_label)
-        usage_logger.record(
+        usage_logger.record_token_usage(
             call_type="regenerate",
             lesson_id=context["id"],
             tier=context["tier"],
             model=settings.gemini_model,
-            max_output_tokens=settings.generation_max_output_tokens,
             usage_metadata=response.usage_metadata,
         )
 
@@ -454,7 +452,7 @@ async def generate_one(
     quiz_review_template: str,
     client: genai.Client,
     semaphore: asyncio.Semaphore,
-    usage_logger: TokenUsageLogger,
+    usage_logger: PipelineLogger,
     dry_run: bool,
     resume: bool,
 ) -> tuple[str, str, str]:
@@ -474,6 +472,7 @@ async def generate_one(
     # Resume: skip if approved output already exists
     if resume and approved_path.exists():
         logger.info(f"{label} Skipped (already approved)")
+        await usage_logger.update_progress(lesson_id, tier, "skipped")
         return lesson_id, tier, "skipped"
 
     if dry_run:
@@ -492,8 +491,10 @@ async def generate_one(
             raw_data: dict[str, Any] = json.loads(generated_path.read_text(encoding="utf-8"))
         except Exception as exc:
             logger.error(f"{label} Failed to load generated file: {exc}")
+            await usage_logger.update_progress(lesson_id, tier, "failed", error=f"Load error: {exc}")
             return lesson_id, tier, "failed"
     else:
+        await usage_logger.update_progress(lesson_id, tier, "generating")
         prompt = build_prompt(context, combined_template, lesson_prompt_template, quiz_prompt_template)
         async with semaphore:
             try:
@@ -506,18 +507,18 @@ async def generate_one(
                     label=label,
                 )
                 raw_text: str = _extract_text(response, label)
-                usage_logger.record(
+                usage_logger.record_token_usage(
                     call_type="generate",
                     lesson_id=lesson_id,
                     tier=tier,
                     model=settings.gemini_model,
-                    max_output_tokens=settings.generation_max_output_tokens,
                     usage_metadata=response.usage_metadata,
                 )
             except Exception as exc:
                 elapsed = time.monotonic() - start
                 logger.error(f"{label} FAILED ({elapsed:.1f}s): {exc}")
                 _write_error(generated_path, f"API error: {exc}", "")
+                await usage_logger.update_progress(lesson_id, tier, "failed", error=f"API error: {exc}")
                 return lesson_id, tier, "failed"
 
         try:
@@ -526,6 +527,7 @@ async def generate_one(
             elapsed = time.monotonic() - start
             logger.error(f"{label} FAILED ({elapsed:.1f}s): Invalid JSON — {exc}")
             _write_error(generated_path, f"JSON decode error: {exc}", raw_text)
+            await usage_logger.update_progress(lesson_id, tier, "failed", error=f"JSON decode error: {exc}")
             return lesson_id, tier, "failed"
 
         if "lesson" not in raw_data or "quiz" not in raw_data:
@@ -533,6 +535,7 @@ async def generate_one(
             msg = f'Response missing "lesson" or "quiz" key. Keys found: {list(raw_data.keys())}'
             logger.error(f"{label} FAILED ({elapsed:.1f}s): {msg}")
             _write_error(generated_path, msg, raw_text)
+            await usage_logger.update_progress(lesson_id, tier, "failed", error=msg)
             return lesson_id, tier, "failed"
 
         generated_output: dict[str, Any] = {
@@ -547,10 +550,13 @@ async def generate_one(
         except OSError as exc:
             elapsed = time.monotonic() - start
             logger.error(f"{label} FAILED ({elapsed:.1f}s): Could not write generated file — {exc}")
+            await usage_logger.update_progress(lesson_id, tier, "failed", error=f"Write error: {exc}")
             return lesson_id, tier, "failed"
+        await usage_logger.update_progress(lesson_id, tier, "generated")
         raw_data = generated_output
 
     # --- Phase 2: Review ---
+    await usage_logger.update_progress(lesson_id, tier, "reviewing")
     logger.info(f"{label} Reviewing...")
     try:
         review_result = await call_reviewer(
@@ -565,7 +571,13 @@ async def generate_one(
     except Exception as exc:
         elapsed = time.monotonic() - start
         logger.error(f"{label} Review FAILED ({elapsed:.1f}s): {exc}")
+        await usage_logger.update_progress(lesson_id, tier, "failed", error=f"Review error: {exc}")
         return lesson_id, tier, "failed"
+
+    blocking_count = sum(
+        1 for i in review_result.lesson_issues + review_result.quiz_issues
+        if i.severity == "blocking"
+    )
 
     try:
         with reviewed_path.open("w", encoding="utf-8") as f:
@@ -573,17 +585,17 @@ async def generate_one(
     except OSError as exc:
         logger.warning(f"{label} Could not write review file: {exc}")
 
+    await usage_logger.update_progress(lesson_id, tier, "reviewed", blocking_issues=blocking_count)
+
     # --- Phase 3: Conditional regeneration ---
     if review_result.passed:
         final = raw_data
         status = "approved"
+        regenerated = False
         logger.info(f"{label} Review passed.")
     else:
-        blocking_count = sum(
-            1 for i in review_result.lesson_issues + review_result.quiz_issues
-            if i.severity == "blocking"
-        )
         logger.info(f"{label} Review found {blocking_count} blocking issue(s). Regenerating...")
+        await usage_logger.update_progress(lesson_id, tier, "regenerating")
         try:
             regen_data = await call_regenerator(
                 original_generated=raw_data,
@@ -599,11 +611,14 @@ async def generate_one(
         except Exception as exc:
             elapsed = time.monotonic() - start
             logger.error(f"{label} Regen FAILED ({elapsed:.1f}s): {exc}")
+            await usage_logger.update_progress(lesson_id, tier, "failed", error=f"Regen error: {exc}")
             return lesson_id, tier, "failed"
 
         if "lesson" not in regen_data or "quiz" not in regen_data:
             elapsed = time.monotonic() - start
-            logger.error(f"{label} FAILED ({elapsed:.1f}s): Regen missing lesson/quiz keys")
+            msg = "Regen missing lesson/quiz keys"
+            logger.error(f"{label} FAILED ({elapsed:.1f}s): {msg}")
+            await usage_logger.update_progress(lesson_id, tier, "failed", error=msg)
             return lesson_id, tier, "failed"
 
         final = {
@@ -613,6 +628,7 @@ async def generate_one(
             "quiz": regen_data["quiz"],
         }
         status = "approved_after_regen"
+        regenerated = True
 
     # --- Phase 4: Write approved output ---
     try:
@@ -621,7 +637,14 @@ async def generate_one(
     except OSError as exc:
         elapsed = time.monotonic() - start
         logger.error(f"{label} FAILED ({elapsed:.1f}s): Could not write approved file — {exc}")
+        await usage_logger.update_progress(lesson_id, tier, "failed", error=f"Write error: {exc}")
         return lesson_id, tier, "failed"
+
+    await usage_logger.update_progress(
+        lesson_id, tier, "approved",
+        regenerated=regenerated,
+        blocking_issues=blocking_count,
+    )
 
     elapsed = time.monotonic() - start
     logger.info(f"{label} Done ({elapsed:.1f}s) — {status}")
@@ -669,7 +692,7 @@ async def run_pipeline(
         (APPROVED_DIR / tier_slug).mkdir(parents=True, exist_ok=True)
 
     semaphore = asyncio.Semaphore(settings.concurrency_limit)
-    usage_logger = TokenUsageLogger()
+    usage_logger = PipelineLogger()
 
     tasks = []
     for lesson_outline in lessons:

@@ -51,7 +51,7 @@ _review_stub.ReviewResult = MagicMock()  # type: ignore[attr-defined]
 sys.modules.setdefault("review_models", _review_stub)
 
 _token_stub = types.ModuleType("token_usage_log")
-_token_stub.TokenUsageLogger = MagicMock()  # type: ignore[attr-defined]
+_token_stub.PipelineLogger = MagicMock()  # type: ignore[attr-defined]
 sys.modules.setdefault("token_usage_log", _token_stub)
 
 # Now import the helpers

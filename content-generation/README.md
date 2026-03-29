@@ -122,11 +122,14 @@ Each review file shape:
 
 **Per combination, up to 3 LLM calls are made:** generate → review → regenerate (only if the reviewer found blocking issues). If review passes, `approved/` is written directly from the generated output.
 
-### Token usage logging
+### Pipeline logging
 
-Every API call is logged to `courses/linux-basics/pipeline/token_usage.csv` (created on first run). Token counts come directly from the Gemini API response and are exact.
+Every run writes to `courses/linux-basics/pipeline/pipeline_log.json` (created on first run). The file has two top-level sections:
 
-**Default behaviour (no `--verbose`):** each call is silently appended to the CSV. A session summary is printed at INFO level at the end of the run:
+- **`progress`** — one record per lesson × tier combination, updated in-place as each combination moves through phases. Useful for at-a-glance status after a crash or partial run.
+- **`token_usage`** — append-only array of per-API-call token counts. Token counts come directly from the Gemini API response and are exact.
+
+**Default behaviour (no `--verbose`):** each call is silently written to the log. A session summary is printed at INFO level at the end of the run:
 
 ```
 Token usage this session (2 API calls: 1 generate, 1 review)
@@ -134,26 +137,27 @@ Token usage this session (2 API calls: 1 generate, 1 review)
   candidates tokens:      1,851
   thoughts tokens:          620
   total tokens:           5,883
-  Logged to: .../courses/linux-basics/pipeline/token_usage.csv
+  Logged to: .../courses/linux-basics/pipeline/pipeline_log.json
 ```
 
 **With `--verbose`:** additionally prints one DEBUG line per call as it completes:
 
 ```
-[token_usage] L01 Beginner (generate) — prompt=2100, candidates=1851, thoughts=420, total=4371
-[token_usage] L01 Beginner (review)   — prompt=1312, candidates=480,  thoughts=200, total=1992
+[pipeline_log] L01 Beginner (generate) — prompt=2100, candidates=1851, thoughts=420, total=4371
+[pipeline_log] L01 Beginner (review)   — prompt=1312, candidates=480,  thoughts=200, total=1992
 ```
 
-**CSV columns:**
+**Progress statuses:** `generating` → `generated` → `reviewing` → `reviewed` → [`regenerating` →] `approved` | `failed` | `skipped`
 
-| Column | Description |
+**Token usage fields:**
+
+| Field | Description |
 |---|---|
 | `timestamp_utc` | ISO-8601 UTC timestamp of the call |
 | `call_type` | `generate`, `review`, or `regenerate` |
 | `lesson_id` | e.g. `L01` |
 | `tier` | `Beginner`, `Intermediate`, or `Advanced` |
 | `model` | Gemini model name used |
-| `max_output_tokens_config` | The token limit set in config for this call type — compare against `candidates_tokens` to spot truncation |
 | `prompt_tokens` | Tokens in the input prompt |
 | `candidates_tokens` | Tokens in the model's output |
 | `thoughts_tokens` | Reasoning tokens (Gemini 3.x thinking mode only; 0 otherwise) |
