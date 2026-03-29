@@ -176,14 +176,36 @@ def build_prompt(
 # Gemini clients
 # ---------------------------------------------------------------------------
 
+def _needs_global_endpoint(model: str) -> bool:
+    """Gemini 3.x models are only available on the global endpoint."""
+    return model.startswith("gemini-3")
+
+
 def make_client() -> genai.Client:
-    """Return a google-genai Client using Application Default Credentials."""
-    credentials, _ = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/generative-language"]
+    """Return a google-genai Client using Application Default Credentials via Vertex AI.
+
+    Gemini 3.x models require location='global' and api_version='v1'.
+    If either the generator or reviewer model is Gemini 3.x, the global endpoint
+    is used — it also serves Gemini 2.x models, so a single client covers both.
+    """
+    credentials, project = google.auth.default(
+        scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
-    request = google.auth.transport.requests.Request()
-    credentials.refresh(request)
-    return genai.Client(credentials=credentials)
+    use_global = _needs_global_endpoint(settings.gemini_model) or _needs_global_endpoint(settings.reviewer_model)
+    if use_global:
+        return genai.Client(
+            vertexai=True,
+            project=project or settings.gcp_project_id,
+            location="global",
+            credentials=credentials,
+            http_options=genai_types.HttpOptions(api_version="v1"),
+        )
+    return genai.Client(
+        vertexai=True,
+        project=project or settings.gcp_project_id,
+        location=settings.gcp_location,
+        credentials=credentials,
+    )
 
 
 def _thinking_config(model: str, level: str | None) -> genai_types.ThinkingConfig | None:

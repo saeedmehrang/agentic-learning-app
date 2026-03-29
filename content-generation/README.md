@@ -59,6 +59,11 @@ Requires GCP Application Default Credentials (ADC) in the environment:
 gcloud auth application-default login
 ```
 
+The `generativelanguage.googleapis.com` API must be enabled on the GCP project (it is included in `infra/scripts/enable_apis.sh`). To enable it manually:
+```bash
+gcloud services enable generativelanguage.googleapis.com --project=agentic-learning-app-e13cb
+```
+
 ---
 
 ## Step 1 — Generate content
@@ -224,7 +229,7 @@ Settings are loaded from `../.env` via `config.py` (pydantic-settings, `extra="i
 | `GEMINI_MODEL` | `gemini-2.0-flash` | `generate_content.py` |
 | `GENERATION_TEMPERATURE` | `0.7` | `generate_content.py` |
 | `GENERATION_MAX_OUTPUT_TOKENS` | `8192` | `generate_content.py` |
-| `REVIEWER_MODEL` | `gemini-2.0-flash` | `generate_content.py` |
+| `REVIEWER_MODEL` | `gemini-3.1-flash-lite-preview` | `generate_content.py` |
 | `REVIEWER_TEMPERATURE` | `0.2` | `generate_content.py` |
 | `REVIEWER_MAX_OUTPUT_TOKENS` | `2048` | `generate_content.py` |
 | `CONCURRENCY_LIMIT` | `5` | `generate_content.py` |

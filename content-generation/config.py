@@ -13,10 +13,10 @@ class ContentSettings(BaseSettings):
     )
 
     # Gemini generation
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.1-flash-lite-preview"
     generation_temperature: float = 0.7
     generation_max_output_tokens: int = 8192
-    generation_thinking_level: str | None = None  # Gemini 3 series only: minimal | low | medium | high
+    generation_thinking_level: str | None = "medium"  # Gemini 3 series only: minimal | low | medium | high
 
     # Reviewer LLM
     reviewer_model: str = "gemini-3-flash-preview"
