@@ -32,6 +32,7 @@ import yaml
 
 from config import settings
 from review_models import ReviewResult
+from token_usage_log import TokenUsageLogger
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -246,6 +247,7 @@ async def call_reviewer(
     quiz_review_template: str,
     client: genai.Client,
     semaphore: asyncio.Semaphore,
+    usage_logger: TokenUsageLogger,
 ) -> ReviewResult:
     """Call the reviewer LLM and return a structured ReviewResult."""
     review_prompt = f"""\
@@ -286,6 +288,14 @@ Do not include a "passed" field — it will be computed from your issues.
             ),
         )
         raw_text: str = response.text
+        usage_logger.record(
+            call_type="review",
+            lesson_id=context["id"],
+            tier=context["tier"],
+            model=settings.reviewer_model,
+            max_output_tokens=settings.reviewer_max_output_tokens,
+            usage_metadata=response.usage_metadata,
+        )
 
     data = json.loads(raw_text)
     result = ReviewResult.model_validate(data)
@@ -302,6 +312,7 @@ async def call_regenerator(
     quiz_prompt_template: str,
     client: genai.Client,
     semaphore: asyncio.Semaphore,
+    usage_logger: TokenUsageLogger,
 ) -> dict[str, Any]:
     """Regenerate content incorporating reviewer feedback on blocking issues."""
     blocking_lesson = [
@@ -343,6 +354,14 @@ PREVIOUS GENERATION (for reference):
             ),
         )
         raw_text: str = response.text
+        usage_logger.record(
+            call_type="regenerate",
+            lesson_id=context["id"],
+            tier=context["tier"],
+            model=settings.gemini_model,
+            max_output_tokens=settings.generation_max_output_tokens,
+            usage_metadata=response.usage_metadata,
+        )
 
     return json.loads(raw_text)
 
@@ -362,6 +381,7 @@ async def generate_one(
     quiz_review_template: str,
     client: genai.Client,
     semaphore: asyncio.Semaphore,
+    usage_logger: TokenUsageLogger,
     dry_run: bool,
     resume: bool,
 ) -> tuple[str, str, str]:
@@ -414,6 +434,14 @@ async def generate_one(
                     ),
                 )
                 raw_text: str = response.text
+                usage_logger.record(
+                    call_type="generate",
+                    lesson_id=lesson_id,
+                    tier=tier,
+                    model=settings.gemini_model,
+                    max_output_tokens=settings.generation_max_output_tokens,
+                    usage_metadata=response.usage_metadata,
+                )
             except Exception as exc:
                 elapsed = time.monotonic() - start
                 logger.error(f"{label} FAILED ({elapsed:.1f}s): {exc}")
@@ -460,6 +488,7 @@ async def generate_one(
             quiz_review_template=quiz_review_template,
             client=client,
             semaphore=semaphore,
+            usage_logger=usage_logger,
         )
     except Exception as exc:
         elapsed = time.monotonic() - start
@@ -493,6 +522,7 @@ async def generate_one(
                 quiz_prompt_template=quiz_prompt_template,
                 client=client,
                 semaphore=semaphore,
+                usage_logger=usage_logger,
             )
         except Exception as exc:
             elapsed = time.monotonic() - start
@@ -567,6 +597,7 @@ async def run_pipeline(
         (APPROVED_DIR / tier_slug).mkdir(parents=True, exist_ok=True)
 
     semaphore = asyncio.Semaphore(settings.concurrency_limit)
+    usage_logger = TokenUsageLogger()
 
     tasks = []
     for lesson_outline in lessons:
@@ -583,6 +614,7 @@ async def run_pipeline(
                     quiz_review_template=quiz_review_template,
                     client=client,
                     semaphore=semaphore,
+                    usage_logger=usage_logger,
                     dry_run=dry_run,
                     resume=resume,
                 )
@@ -603,6 +635,7 @@ async def run_pipeline(
         f"{counts['skipped']} skipped, "
         f"{counts['failed']} failed."
     )
+    usage_logger.print_session_summary()
 
 
 # ---------------------------------------------------------------------------
@@ -634,11 +667,19 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip lesson × tier combinations where the approved output file already exists.",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable DEBUG logging, including per-call token usage.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
 
     # Load source data
     try:
