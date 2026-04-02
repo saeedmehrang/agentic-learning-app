@@ -55,21 +55,26 @@ All items below are implemented. No further code changes required.
 
 ## Phase 2 — Build and Push Images
 
-- [ ] **2.1** Build and push the generation image via Cloud Build:
+- [x] **2.1** Build and push the generation image via Cloud Build:
   ```bash
   gcloud builds submit \
-    --config infra/cloudbuild/content-generate.yaml \
-    .
+  --config infra/cloudbuild/content-generate.yaml \
+  --substitutions=COMMIT_SHA=$(git rev-parse --short HEAD) \
+  .
   ```
   Confirm image appears in Artifact Registry:
   `us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/content-generate:latest`
-
-- [ ] **2.2** Build and push the seed image:
   ```bash
-  gcloud builds submit \
-    --tag us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/content-seed:latest \
-    --dockerfile content-generation/Dockerfile.seed \
-    .
+  2df92d48-738f-4532-ba0e-628bf2102407  2026-04-02T16:58:25+00:00  1M8S      gs://agentic-learning-app-e13cb_cloudbuild/source/1775149102.402403-085bfdcbc407438b818e1c52cbc1fe1a.tgz  us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/content-generate:2d37d6d (+2 more)  SUCCESS
+  ```
+
+- [x] **2.2** Build and push the seed image:
+  ```bash
+  gcloud builds submit --config infra/cloudbuild/content-seed.yaml .
+  ```
+  output:
+  ```bash
+4661c4ef-3162-463c-9c21-caa34b24057c  2026-04-02T16:59:54+00:00  1M13S     gs://agentic-learning-app-e13cb_cloudbuild/source/1775149191.531326-72d4d569ca474e449fe2f89d3e986319.tgz  us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/content-seed (+1 more)  SUCCESS
   ```
 
 ---

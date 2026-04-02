@@ -38,8 +38,8 @@ COPY content-generation/generate_content.py \
 
 # Copy static course assets needed at generation time
 # (pipeline/ outputs are NOT copied — they live in GCS on Cloud Run)
-COPY courses/linux-basics/outlines.yaml     /app/courses/linux-basics/outlines.yaml
-COPY courses/linux-basics/concept_map.json  /app/courses/linux-basics/concept_map.json
-COPY courses/linux-basics/prompts/          /app/courses/linux-basics/prompts/
+COPY courses/linux-basics/outlines.yaml     /courses/linux-basics/outlines.yaml
+COPY courses/linux-basics/concept_map.json  /courses/linux-basics/concept_map.json
+COPY courses/linux-basics/prompts/          /courses/linux-basics/prompts/
 
 ENTRYPOINT ["python", "generate_content.py"]

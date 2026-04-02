@@ -35,6 +35,6 @@ COPY content-generation/seed_db.py \
      ./
 
 # Copy outlines.yaml for module_id lookup (not a pipeline output — static asset)
-COPY courses/linux-basics/outlines.yaml /app/courses/linux-basics/outlines.yaml
+COPY courses/linux-basics/outlines.yaml /courses/linux-basics/outlines.yaml
 
 ENTRYPOINT ["python", "seed_db.py"]
