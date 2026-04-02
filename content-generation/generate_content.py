@@ -219,22 +219,22 @@ def _thinking_config(model: str, level: str | None) -> genai_types.ThinkingConfi
     return None
 
 
-def generation_config() -> genai_types.GenerateContentConfig:
+def generation_config(max_output_tokens: int | None = None) -> genai_types.GenerateContentConfig:
     """Return GenerateContentConfig for the generator model."""
     return genai_types.GenerateContentConfig(
         temperature=settings.generation_temperature,
-        max_output_tokens=settings.generation_max_output_tokens,
+        max_output_tokens=max_output_tokens or settings.generation_max_output_tokens,
         response_mime_type=_RESPONSE_MIME_TYPE,
         thinking_config=_thinking_config(settings.gemini_model, settings.generation_thinking_level),
         automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
     )
 
 
-def reviewer_config() -> genai_types.GenerateContentConfig:
+def reviewer_config(max_output_tokens: int | None = None) -> genai_types.GenerateContentConfig:
     """Return GenerateContentConfig for the reviewer model."""
     return genai_types.GenerateContentConfig(
         temperature=settings.reviewer_temperature,
-        max_output_tokens=settings.reviewer_max_output_tokens,
+        max_output_tokens=max_output_tokens or settings.reviewer_max_output_tokens,
         response_mime_type=_RESPONSE_MIME_TYPE,
         thinking_config=_thinking_config(settings.reviewer_model, settings.reviewer_thinking_level),
         automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
@@ -310,6 +310,54 @@ async def _call_with_retry(
     raise ValueError(f"{label} response.text remained None after {_MAX_RETRIES} attempts")
 
 
+async def _call_generate_json(
+    client: genai.Client,
+    model: str,
+    contents: str,
+    config_factory: Any,  # callable(max_output_tokens: int | None) -> GenerateContentConfig
+    base_max_tokens: int,
+    semaphore: asyncio.Semaphore,
+    usage_logger: PipelineLogger,
+    call_type: str,
+    lesson_id: str,
+    tier: str,
+    label: str,
+) -> dict[str, Any]:
+    """Call Gemini, extract text, log token usage, parse JSON.
+
+    On JSONDecodeError (truncated output), retries once with doubled max_output_tokens.
+    Raises ValueError or JSONDecodeError if both attempts fail.
+    """
+    async def _once(max_tokens: int | None) -> str:
+        async with semaphore:
+            response = await _call_with_retry(
+                lambda: client.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=config_factory(max_tokens),
+                ),
+                label=label,
+            )
+            raw_text = _extract_text(response, label)
+            usage_logger.record_token_usage(
+                call_type=call_type,
+                lesson_id=lesson_id,
+                tier=tier,
+                model=model,
+                usage_metadata=response.usage_metadata,
+            )
+        return raw_text
+
+    raw_text = await _once(None)
+    try:
+        return json.loads(_strip_code_fence(raw_text))
+    except json.JSONDecodeError:
+        retry_tokens = base_max_tokens * 2
+        logger.warning(f"{label} JSON truncated, retrying with max_output_tokens={retry_tokens}")
+        raw_text = await _once(retry_tokens)
+        return json.loads(_strip_code_fence(raw_text))
+
+
 # ---------------------------------------------------------------------------
 # Reviewer and regenerator
 # ---------------------------------------------------------------------------
@@ -351,26 +399,20 @@ Return a single JSON object with exactly these top-level keys:
 
 Do not include a "passed" field — it will be computed from your issues.
 """
-    label = f"[{context['id']} {context['tier']}]"
-    async with semaphore:
-        response = await _call_with_retry(
-            lambda: client.models.generate_content(
-                model=settings.reviewer_model,
-                contents=review_prompt,
-                config=reviewer_config(),
-            ),
-            label=f"{label}[review]",
-        )
-        raw_text = _extract_text(response, f"{label}[review]")
-        usage_logger.record_token_usage(
-            call_type="review",
-            lesson_id=context["id"],
-            tier=context["tier"],
-            model=settings.reviewer_model,
-            usage_metadata=response.usage_metadata,
-        )
-
-    data = json.loads(_strip_code_fence(raw_text))
+    label = f"[{context['id']} {context['tier']}][review]"
+    data = await _call_generate_json(
+        client=client,
+        model=settings.reviewer_model,
+        contents=review_prompt,
+        config_factory=reviewer_config,
+        base_max_tokens=settings.reviewer_max_output_tokens,
+        semaphore=semaphore,
+        usage_logger=usage_logger,
+        call_type="review",
+        lesson_id=context["id"],
+        tier=context["tier"],
+        label=label,
+    )
     result = ReviewResult.model_validate(data)
     result.compute_passed()
     return result
@@ -417,25 +459,19 @@ PREVIOUS GENERATION (for reference):
     regen_prompt = base_prompt + revision_section
 
     regen_label = f"[{context['id']} {context['tier']}][regen]"
-    async with semaphore:
-        response = await _call_with_retry(
-            lambda: client.models.generate_content(
-                model=settings.gemini_model,
-                contents=regen_prompt,
-                config=generation_config(),
-            ),
-            label=regen_label,
-        )
-        raw_text = _extract_text(response, regen_label)
-        usage_logger.record_token_usage(
-            call_type="regenerate",
-            lesson_id=context["id"],
-            tier=context["tier"],
-            model=settings.gemini_model,
-            usage_metadata=response.usage_metadata,
-        )
-
-    return json.loads(_strip_code_fence(raw_text))
+    return await _call_generate_json(
+        client=client,
+        model=settings.gemini_model,
+        contents=regen_prompt,
+        config_factory=generation_config,
+        base_max_tokens=settings.generation_max_output_tokens,
+        semaphore=semaphore,
+        usage_logger=usage_logger,
+        call_type="regenerate",
+        lesson_id=context["id"],
+        tier=context["tier"],
+        label=regen_label,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -497,38 +533,25 @@ async def generate_one(
     else:
         await usage_logger.update_progress(lesson_id, tier, "generating")
         prompt = build_prompt(context, combined_template, lesson_prompt_template, quiz_prompt_template)
-        async with semaphore:
-            try:
-                response = await _call_with_retry(
-                    lambda: client.models.generate_content(
-                        model=settings.gemini_model,
-                        contents=prompt,
-                        config=generation_config(),
-                    ),
-                    label=label,
-                )
-                raw_text: str = _extract_text(response, label)
-                usage_logger.record_token_usage(
-                    call_type="generate",
-                    lesson_id=lesson_id,
-                    tier=tier,
-                    model=settings.gemini_model,
-                    usage_metadata=response.usage_metadata,
-                )
-            except Exception as exc:
-                elapsed = time.monotonic() - start
-                logger.error(f"{label} FAILED ({elapsed:.1f}s): {exc}")
-                _write_error(generated_rel, f"API error: {exc}", "")
-                await usage_logger.update_progress(lesson_id, tier, "failed", error=f"API error: {exc}")
-                return lesson_id, tier, "failed"
-
         try:
-            raw_data = json.loads(_strip_code_fence(raw_text))
-        except json.JSONDecodeError as exc:
+            raw_data = await _call_generate_json(
+                client=client,
+                model=settings.gemini_model,
+                contents=prompt,
+                config_factory=generation_config,
+                base_max_tokens=settings.generation_max_output_tokens,
+                semaphore=semaphore,
+                usage_logger=usage_logger,
+                call_type="generate",
+                lesson_id=lesson_id,
+                tier=tier,
+                label=label,
+            )
+        except Exception as exc:
             elapsed = time.monotonic() - start
-            logger.error(f"{label} FAILED ({elapsed:.1f}s): Invalid JSON — {exc}")
-            _write_error(generated_rel, f"JSON decode error: {exc}", raw_text)
-            await usage_logger.update_progress(lesson_id, tier, "failed", error=f"JSON decode error: {exc}")
+            logger.error(f"{label} FAILED ({elapsed:.1f}s): {exc}")
+            _write_error(generated_rel, f"Generation error: {exc}", "")
+            await usage_logger.update_progress(lesson_id, tier, "failed", error=f"Generation error: {exc}")
             return lesson_id, tier, "failed"
 
         if "lesson" not in raw_data or "quiz" not in raw_data:
