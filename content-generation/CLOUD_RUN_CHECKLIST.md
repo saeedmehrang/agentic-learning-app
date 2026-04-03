@@ -65,7 +65,7 @@ All items below are implemented. No further code changes required.
   Confirm image appears in Artifact Registry:
   `us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/content-generate:latest`
   ```bash
-  2df92d48-738f-4532-ba0e-628bf2102407  2026-04-02T16:58:25+00:00  1M8S      gs://agentic-learning-app-e13cb_cloudbuild/source/1775149102.402403-085bfdcbc407438b818e1c52cbc1fe1a.tgz  us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/content-generate:2d37d6d (+2 more)  SUCCESS
+  739ab300-810d-4f20-bed3-8c000d161309  2026-04-03T10:22:09+00:00  1M20S     gs://agentic-learning-app-e13cb_cloudbuild/source/1775211727.911701-82b1fe2e3a564ad7b98a0fd63f3b248d.tgz  us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/content-generate:482fed7 (+2 more)  SUCCESS
   ```
 
 - [x] **2.2** ~~Build and push the seed image~~ — no longer needed. The `content-seed` Cloud Run
@@ -88,21 +88,21 @@ All items below are implemented. No further code changes required.
   ```
   `--max-retries 0` — the pipeline manages its own crash recovery via `--resume`.
 
-- [ ] **3.2** Create Cloud Run Job for **embedding** (same image, different entrypoint):
+- [x] **3.2** Create Cloud Run Job for **embedding** (same image, different entrypoint):
   ```bash
   gcloud run jobs create content-embed \
   --image us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/content-generate:latest \
   --region us-central1 \
   --service-account cloud-run-app-identity@agentic-learning-app-e13cb.iam.gserviceaccount.com \
   --set-env-vars GCS_PIPELINE_BUCKET=agentic-learning-pipeline \
-  --entrypoint python \
+  --command python \
   --args="embed_content.py,--resume" \
   --memory 1Gi \
   --task-timeout 3600 \
   --max-retries 0
   ```
 
-- [ ] **3.3** Create Cloud Run Job for **seeding** (same image as generate/embed, entrypoint overridden):
+- [x] **3.3** Create Cloud Run Job for **seeding** (same image as generate/embed, entrypoint overridden):
   ```bash
   gcloud run jobs create content-seed \
     --image us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/content-generate:latest \
@@ -110,7 +110,7 @@ All items below are implemented. No further code changes required.
     --service-account cloud-run-app-identity@agentic-learning-app-e13cb.iam.gserviceaccount.com \
     --set-env-vars GCS_PIPELINE_BUCKET=agentic-learning-pipeline \
     --set-secrets DB_PASSWORD=DB_PASSWORD:latest,DB_INSTANCE_CONNECTION_NAME=DB_CONNECTION_NAME:latest \
-    --entrypoint python \
+    --command python \
     --args="seed_db.py" \
     --memory 512Mi \
     --task-timeout 1800 \

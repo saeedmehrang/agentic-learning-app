@@ -201,6 +201,33 @@ Each embedded file shape:
 
 Note: `tier` is lowercased in the embedded output to match the Cloud SQL `difficulty_tier` ENUM.
 
+### Cloud Run Job (production)
+
+Create the job once:
+
+```bash
+gcloud run jobs create content-embed \
+  --image us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/content-generate:latest \
+  --region us-central1 \
+  --service-account cloud-run-app-identity@agentic-learning-app-e13cb.iam.gserviceaccount.com \
+  --set-env-vars GCS_PIPELINE_BUCKET=agentic-learning-pipeline \
+  --command python \
+  --args="embed_content.py,--resume" \
+  --memory 1Gi \
+  --task-timeout 3600 \
+  --max-retries 0
+```
+
+Execute (omitting `--args` falls back to creation-time args — `embed_content.py --resume`):
+
+```bash
+gcloud run jobs execute content-embed \
+  --region us-central1 \
+  --wait
+```
+
+`--resume` skips files already present in `pipeline/embedded/`, making re-runs safe after partial failures.
+
 ---
 
 ## Step 3 — Seed Cloud SQL
@@ -246,7 +273,7 @@ gcloud run jobs create content-seed \
   --service-account cloud-run-app-identity@agentic-learning-app-e13cb.iam.gserviceaccount.com \
   --set-env-vars GCS_PIPELINE_BUCKET=agentic-learning-pipeline \
   --set-secrets DB_PASSWORD=DB_PASSWORD:latest,DB_INSTANCE_CONNECTION_NAME=DB_CONNECTION_NAME:latest \
-  --entrypoint python \
+  --command python \
   --args="seed_db.py" \
   --memory 512Mi \
   --task-timeout 1800 \
@@ -258,9 +285,10 @@ gcloud run jobs create content-seed \
 ```bash
 gcloud run jobs execute content-seed \
   --region us-central1 \
-  --args="seed_db.py" \
   --wait
 ```
+
+Omitting `--args` falls back to the creation-time args (`seed_db.py`). Pass `--args` only to override (e.g. `--args="seed_db.py,--dry-run"`).
 
 Seeding is idempotent — safe to re-run after adding new content. Rows are only written when their `content_hash` differs from what is already in the database.
 
