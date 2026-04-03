@@ -33,6 +33,20 @@ dev = [
     "ruff>=0.15.7",
 ]
 
+[tool.setuptools]
+py-modules = [
+    "config",
+    "storage",
+    "review_models",
+    "token_usage_log",
+    "generate_content",
+    "embed_content",
+    "seed_db",
+    "validate_embeddings",
+    "validate_db",
+    "count_tokens",
+]
+
 [tool.ruff]
 target-version = "py313"
 line-length = 100

@@ -36,6 +36,8 @@ The `pipeline/` directory is gitignored and created at runtime.
 | `review_models.py` | Pydantic models for structured reviewer output (`ReviewResult`, issue types) |
 | `embed_content.py` | Calls Vertex AI to produce 768-dim embeddings for approved lesson content |
 | `seed_db.py` | Inserts embedded content (lessons, chunks, quiz questions) into Cloud SQL |
+| `validate_embeddings.py` | Spot-checks embedded JSON files in GCS/local for correct structure and vector dimensions |
+| `validate_db.py` | Spot-checks Cloud SQL after seeding — verifies rows, embedding dim, question counts, and hash consistency |
 | `config.py` | Shared pydantic-settings config loaded from `../.env` |
 
 ---
@@ -298,6 +300,34 @@ Seeding is idempotent — safe to re-run after adding new content. Rows are only
 DB_PASSWORD=x DB_INSTANCE_CONNECTION_NAME=x \
   python content-generation/seed_db.py --dry-run
 ```
+
+### 3e. Validate the seeded data
+
+After seeding, run `validate_db.py` to confirm the data landed correctly in Cloud SQL:
+
+```bash
+GCS_PIPELINE_BUCKET=agentic-learning-pipeline \
+  DB_INSTANCE_CONNECTION_NAME=$(gcloud secrets versions access latest --secret=DB_CONNECTION_NAME) \
+  DB_PASSWORD=$(gcloud secrets versions access latest --secret=DB_PASSWORD) \
+  content-generation/.venv/bin/python3 content-generation/validate_db.py --sample 0
+```
+
+The script cross-checks each embedded JSON file against the database and reports:
+
+| Check | What is verified |
+|---|---|
+| `lessons` row exists | `lesson_id` has a row; `module_id` and `title` are non-null; `content_hash` is a 64-char hex string |
+| `content_chunks` row exists | Row present for `(lesson_id, tier)`; `content_text` is non-empty; embedding dimension is exactly 768; `token_count` is a positive integer; `content_hash` matches the embedded JSON file |
+| `quiz_questions` count | Correct number of questions per `(lesson_id, tier)`; each has non-empty `question_text` and `correct_answer`; `format` is one of `mc`, `tf`, `fill`, `command` |
+
+Flags:
+
+| Flag | Description |
+|---|---|
+| _(none)_ | Validate 1 file per tier (3 files total) |
+| `--sample 0` | Validate all seeded files |
+| `--lesson L01` | Validate only lesson L01 |
+| `--tier beginner` | Validate only the beginner tier |
 
 ---
 

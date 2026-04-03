@@ -172,10 +172,10 @@ def extract_distractors(
 # ---------------------------------------------------------------------------
 
 
-def get_connection(connector: Connector) -> pg8000.native.Connection:
-    """Open a pg8000 connection via the Cloud SQL Python Connector."""
+def get_connection(connector: Connector) -> pg8000.dbapi.Connection:
+    """Open a pg8000 DBAPI connection via the Cloud SQL Python Connector."""
     return connector.connect(
-        instance_connection_name=seed_settings.db_instance_connection_name,
+        instance_connection_string=seed_settings.db_instance_connection_name,
         driver="pg8000",
         user=seed_settings.db_user,
         password=seed_settings.db_password,
@@ -189,7 +189,7 @@ def get_connection(connector: Connector) -> pg8000.native.Connection:
 
 
 def seed_lessons(
-    conn: pg8000.native.Connection,
+    conn: pg8000.dbapi.Connection,
     lesson_id: str,
     outline: dict[str, Any],
 ) -> None:
@@ -205,10 +205,11 @@ def seed_lessons(
             ensure_ascii=False,
         ).encode()
     ).hexdigest()
-    conn.run(
+    cur = conn.cursor()
+    cur.execute(
         """
         INSERT INTO lessons (lesson_id, module_id, title, prerequisites, concept_tags, content_hash)
-        VALUES (:lesson_id, :module_id, :title, :prerequisites, :concept_tags, :content_hash)
+        VALUES (%s, %s, %s, %s, %s, %s)
         ON CONFLICT (lesson_id) DO UPDATE
             SET module_id     = EXCLUDED.module_id,
                 title         = EXCLUDED.title,
@@ -216,17 +217,20 @@ def seed_lessons(
                 content_hash  = EXCLUDED.content_hash
             WHERE lessons.content_hash IS DISTINCT FROM EXCLUDED.content_hash
         """,
-        lesson_id=lesson_id,
-        module_id=outline["module_id"],
-        title=outline["title"],
-        prerequisites=outline["prerequisites"],
-        concept_tags=[],  # filled in Phase 1.1
-        content_hash=content_hash,
+        (
+            lesson_id,
+            outline["module_id"],
+            outline["title"],
+            outline["prerequisites"],
+            [],  # concept_tags — filled in Phase 1.1
+            content_hash,
+        ),
     )
+    conn.commit()
 
 
 def seed_content_chunk(
-    conn: pg8000.native.Connection,
+    conn: pg8000.dbapi.Connection,
     lesson_id: str,
     tier_slug: str,
     chunk: dict[str, Any],
@@ -238,10 +242,11 @@ def seed_content_chunk(
     unnecessary 768-dim vector writes to pgvector on unchanged content.
     """
     embedding_str = "[" + ",".join(str(v) for v in chunk["embedding"]) + "]"
-    conn.run(
+    cur = conn.cursor()
+    cur.execute(
         """
         INSERT INTO content_chunks (lesson_id, tier, content_text, embedding, token_count, content_hash)
-        VALUES (:lesson_id, :tier, :content_text, :embedding::vector, :token_count, :content_hash)
+        VALUES (%s, %s, %s, %s::vector, %s, %s)
         ON CONFLICT (lesson_id, tier) DO UPDATE
             SET content_text = EXCLUDED.content_text,
                 embedding    = EXCLUDED.embedding,
@@ -249,17 +254,20 @@ def seed_content_chunk(
                 content_hash = EXCLUDED.content_hash
             WHERE content_chunks.content_hash IS DISTINCT FROM EXCLUDED.content_hash
         """,
-        lesson_id=lesson_id,
-        tier=tier_slug,
-        content_text=chunk["text"],
-        embedding=embedding_str,
-        token_count=chunk.get("token_count", 0),
-        content_hash=content_hash,
+        (
+            lesson_id,
+            tier_slug,
+            chunk["text"],
+            embedding_str,
+            chunk.get("token_count", 0),
+            content_hash,
+        ),
     )
+    conn.commit()
 
 
 def seed_quiz_question(
-    conn: pg8000.native.Connection,
+    conn: pg8000.dbapi.Connection,
     lesson_id: str,
     tier_slug: str,
     question: dict[str, Any],
@@ -289,18 +297,15 @@ def seed_quiz_question(
         ).encode()
     ).hexdigest()
 
-    conn.run(
+    cur = conn.cursor()
+    cur.execute(
         """
         INSERT INTO quiz_questions (
             question_id, lesson_id, tier, format,
             question_text, correct_answer, distractors, explanation,
             options_json, learning_objective_ref, content_hash
         )
-        VALUES (
-            :question_id, :lesson_id, :tier, :format,
-            :question_text, :correct_answer, :distractors, :explanation,
-            :options_json, :learning_objective_ref, :content_hash
-        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (question_id) DO UPDATE
             SET question_text          = EXCLUDED.question_text,
                 correct_answer         = EXCLUDED.correct_answer,
@@ -311,18 +316,21 @@ def seed_quiz_question(
                 content_hash           = EXCLUDED.content_hash
             WHERE quiz_questions.content_hash IS DISTINCT FROM EXCLUDED.content_hash
         """,
-        question_id=question.get("question_id", ""),
-        lesson_id=lesson_id,
-        tier=tier_slug,
-        format=format_code,
-        question_text=question.get("question", ""),
-        correct_answer=answer,
-        distractors=distractors,
-        explanation=explanation,
-        options_json=options_json,
-        learning_objective_ref=learning_objective_ref,
-        content_hash=content_hash,
+        (
+            question.get("question_id", ""),
+            lesson_id,
+            tier_slug,
+            format_code,
+            question.get("question", ""),
+            answer,
+            distractors,
+            explanation,
+            options_json,
+            learning_objective_ref,
+            content_hash,
+        ),
     )
+    conn.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -331,7 +339,7 @@ def seed_quiz_question(
 
 
 def seed_file(
-    conn: pg8000.native.Connection,
+    conn: pg8000.dbapi.Connection,
     rel_path: str,
     outlines_lookup: dict[str, dict[str, Any]],
     dry_run: bool,
