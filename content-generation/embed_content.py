@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import logging
 import sys
@@ -176,6 +177,10 @@ async def embed_one(
         logger.error(f"{label} FAILED: Could not read input — {exc}")
         return lesson_id_stem, tier_slug, "failed"
 
+    content_hash = hashlib.sha256(
+        json.dumps(data, sort_keys=True, ensure_ascii=False).encode()
+    ).hexdigest()
+
     lesson_obj = data.get("lesson", {})
     quiz_obj = data.get("quiz", {})
     lesson_id: str = data.get("lesson_id", lesson_id_stem.upper())
@@ -215,6 +220,7 @@ async def embed_one(
     output: dict[str, Any] = {
         "lesson_id": lesson_id,
         "tier": tier_slug,
+        "content_hash": content_hash,
         "chunk": {
             "text": chunk_text,
             "embedding": vector,

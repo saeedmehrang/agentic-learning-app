@@ -27,6 +27,7 @@ Usage (Cloud Run Job):
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import sys
@@ -192,18 +193,35 @@ def seed_lessons(
     lesson_id: str,
     outline: dict[str, Any],
 ) -> None:
-    """Insert a lesson row. Idempotent via ON CONFLICT DO NOTHING."""
+    """Upsert a lesson row. Updates title/prerequisites when content changes."""
+    content_hash = hashlib.sha256(
+        json.dumps(
+            {
+                "module_id": outline["module_id"],
+                "title": outline["title"],
+                "prerequisites": outline["prerequisites"],
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+        ).encode()
+    ).hexdigest()
     conn.run(
         """
-        INSERT INTO lessons (lesson_id, module_id, title, prerequisites, concept_tags)
-        VALUES (:lesson_id, :module_id, :title, :prerequisites, :concept_tags)
-        ON CONFLICT (lesson_id) DO NOTHING
+        INSERT INTO lessons (lesson_id, module_id, title, prerequisites, concept_tags, content_hash)
+        VALUES (:lesson_id, :module_id, :title, :prerequisites, :concept_tags, :content_hash)
+        ON CONFLICT (lesson_id) DO UPDATE
+            SET module_id     = EXCLUDED.module_id,
+                title         = EXCLUDED.title,
+                prerequisites = EXCLUDED.prerequisites,
+                content_hash  = EXCLUDED.content_hash
+            WHERE lessons.content_hash IS DISTINCT FROM EXCLUDED.content_hash
         """,
         lesson_id=lesson_id,
         module_id=outline["module_id"],
         title=outline["title"],
         prerequisites=outline["prerequisites"],
         concept_tags=[],  # filled in Phase 1.1
+        content_hash=content_hash,
     )
 
 
@@ -212,27 +230,31 @@ def seed_content_chunk(
     lesson_id: str,
     tier_slug: str,
     chunk: dict[str, Any],
+    content_hash: str | None,
 ) -> None:
     """
     Upsert a content_chunk row.
-    Uses ON CONFLICT (lesson_id, tier) DO UPDATE to refresh text and embedding
-    if the lesson is re-embedded after a content edit.
+    Only writes when content_hash differs from the stored value, avoiding
+    unnecessary 768-dim vector writes to pgvector on unchanged content.
     """
     embedding_str = "[" + ",".join(str(v) for v in chunk["embedding"]) + "]"
     conn.run(
         """
-        INSERT INTO content_chunks (lesson_id, tier, content_text, embedding, token_count)
-        VALUES (:lesson_id, :tier, :content_text, :embedding::vector, :token_count)
+        INSERT INTO content_chunks (lesson_id, tier, content_text, embedding, token_count, content_hash)
+        VALUES (:lesson_id, :tier, :content_text, :embedding::vector, :token_count, :content_hash)
         ON CONFLICT (lesson_id, tier) DO UPDATE
             SET content_text = EXCLUDED.content_text,
                 embedding    = EXCLUDED.embedding,
-                token_count  = EXCLUDED.token_count
+                token_count  = EXCLUDED.token_count,
+                content_hash = EXCLUDED.content_hash
+            WHERE content_chunks.content_hash IS DISTINCT FROM EXCLUDED.content_hash
         """,
         lesson_id=lesson_id,
         tier=tier_slug,
         content_text=chunk["text"],
         embedding=embedding_str,
         token_count=chunk.get("token_count", 0),
+        content_hash=content_hash,
     )
 
 
@@ -242,27 +264,52 @@ def seed_quiz_question(
     tier_slug: str,
     question: dict[str, Any],
 ) -> None:
-    """Insert a quiz question row. Idempotent via ON CONFLICT DO NOTHING."""
+    """Upsert a quiz question row. Updates content fields when the hash changes."""
     raw_format = question.get("format", "")
     format_code = FORMAT_MAP.get(raw_format, raw_format)
 
     options: list[str] = question.get("options", [])
     answer: str = question.get("answer", "")
     distractors = extract_distractors(format_code, options, answer)
+    explanation: str = question.get("explanation", "")
+    options_json = json.dumps(options) if options else None
+    learning_objective_ref = question.get("learning_objective_ref")
+
+    content_hash = hashlib.sha256(
+        json.dumps(
+            {
+                "question_text": question.get("question", ""),
+                "correct_answer": answer,
+                "distractors": distractors,
+                "explanation": explanation,
+                "options_json": options_json,
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+        ).encode()
+    ).hexdigest()
 
     conn.run(
         """
         INSERT INTO quiz_questions (
             question_id, lesson_id, tier, format,
             question_text, correct_answer, distractors, explanation,
-            options_json, learning_objective_ref
+            options_json, learning_objective_ref, content_hash
         )
         VALUES (
             :question_id, :lesson_id, :tier, :format,
             :question_text, :correct_answer, :distractors, :explanation,
-            :options_json, :learning_objective_ref
+            :options_json, :learning_objective_ref, :content_hash
         )
-        ON CONFLICT (question_id) DO NOTHING
+        ON CONFLICT (question_id) DO UPDATE
+            SET question_text          = EXCLUDED.question_text,
+                correct_answer         = EXCLUDED.correct_answer,
+                distractors            = EXCLUDED.distractors,
+                explanation            = EXCLUDED.explanation,
+                options_json           = EXCLUDED.options_json,
+                learning_objective_ref = EXCLUDED.learning_objective_ref,
+                content_hash           = EXCLUDED.content_hash
+            WHERE quiz_questions.content_hash IS DISTINCT FROM EXCLUDED.content_hash
         """,
         question_id=question.get("question_id", ""),
         lesson_id=lesson_id,
@@ -271,9 +318,10 @@ def seed_quiz_question(
         question_text=question.get("question", ""),
         correct_answer=answer,
         distractors=distractors,
-        explanation=question.get("explanation", ""),
-        options_json=json.dumps(options) if options else None,
-        learning_objective_ref=question.get("learning_objective_ref"),
+        explanation=explanation,
+        options_json=options_json,
+        learning_objective_ref=learning_objective_ref,
+        content_hash=content_hash,
     )
 
 
@@ -302,6 +350,7 @@ def seed_file(
 
     lesson_id: str = data.get("lesson_id", "")
     tier_slug: str = data.get("tier", "")
+    content_hash: str | None = data.get("content_hash")
     chunk: dict[str, Any] = data.get("chunk", {})
     quiz_questions: list[dict[str, Any]] = data.get("quiz_questions", [])
     label = f"[{lesson_id} {tier_slug}]"
@@ -326,7 +375,7 @@ def seed_file(
 
     try:
         seed_lessons(conn, lesson_id, outline)
-        seed_content_chunk(conn, lesson_id, tier_slug, chunk)
+        seed_content_chunk(conn, lesson_id, tier_slug, chunk, content_hash)
         for question in quiz_questions:
             seed_quiz_question(conn, lesson_id, tier_slug, question)
         logger.info(
