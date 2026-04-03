@@ -46,8 +46,8 @@ All items below are implemented. No further code changes required.
   `load_embedded_files()` uses `storage.list_prefix()`
 - [x] **1.11** `content-generation/Dockerfile` created — combined image for all three scripts
   (`.[gcs,seed]`); default entrypoint is `generate_content.py`
-- [x] **1.12** `content-generation/Dockerfile.seed` updated — removed bulk `COPY courses/`;
-  now copies only `outlines.yaml` + `storage.py`; installs `.[gcs,seed]`
+- [x] **1.12** `content-generation/Dockerfile.seed` deleted — superseded by the combined
+  `Dockerfile`; `content-seed` Cloud Run Job now uses `content-generate:latest` image
 - [x] **1.13** `infra/cloudbuild/content-generate.yaml` created — builds and pushes
   `content-generate` image to Artifact Registry (tagged with commit SHA + latest)
 
@@ -68,20 +68,14 @@ All items below are implemented. No further code changes required.
   2df92d48-738f-4532-ba0e-628bf2102407  2026-04-02T16:58:25+00:00  1M8S      gs://agentic-learning-app-e13cb_cloudbuild/source/1775149102.402403-085bfdcbc407438b818e1c52cbc1fe1a.tgz  us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/content-generate:2d37d6d (+2 more)  SUCCESS
   ```
 
-- [x] **2.2** Build and push the seed image:
-  ```bash
-  gcloud builds submit --config infra/cloudbuild/content-seed.yaml .
-  ```
-  output:
-  ```bash
-4661c4ef-3162-463c-9c21-caa34b24057c  2026-04-02T16:59:54+00:00  1M13S     gs://agentic-learning-app-e13cb_cloudbuild/source/1775149191.531326-72d4d569ca474e449fe2f89d3e986319.tgz  us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/content-seed (+1 more)  SUCCESS
-  ```
+- [x] **2.2** ~~Build and push the seed image~~ — no longer needed. The `content-seed` Cloud Run
+  Job uses the `content-generate:latest` image with an overridden entrypoint.
 
 ---
 
 ## Phase 3 — Create Cloud Run Jobs
 
-- [ ] **3.1** Create Cloud Run Job for **generation**:
+- [x] **3.1** Create Cloud Run Job for **generation**:
   ```bash
   gcloud run jobs create content-generate \
     --image us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/content-generate:latest \
@@ -97,25 +91,27 @@ All items below are implemented. No further code changes required.
 - [ ] **3.2** Create Cloud Run Job for **embedding** (same image, different entrypoint):
   ```bash
   gcloud run jobs create content-embed \
+  --image us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/content-generate:latest \
+  --region us-central1 \
+  --service-account cloud-run-app-identity@agentic-learning-app-e13cb.iam.gserviceaccount.com \
+  --set-env-vars GCS_PIPELINE_BUCKET=agentic-learning-pipeline \
+  --entrypoint python \
+  --args="embed_content.py,--resume" \
+  --memory 1Gi \
+  --task-timeout 3600 \
+  --max-retries 0
+  ```
+
+- [ ] **3.3** Create Cloud Run Job for **seeding** (same image as generate/embed, entrypoint overridden):
+  ```bash
+  gcloud run jobs create content-seed \
     --image us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/content-generate:latest \
     --region us-central1 \
     --service-account cloud-run-app-identity@agentic-learning-app-e13cb.iam.gserviceaccount.com \
     --set-env-vars GCS_PIPELINE_BUCKET=agentic-learning-pipeline \
-    --args="--resume" \
-    --memory 1Gi \
-    --task-timeout 3600 \
-    --max-retries 0
-  ```
-  Override entrypoint: `--entrypoint python --args="embed_content.py,--resume"`
-
-- [ ] **3.3** Create Cloud Run Job for **seeding**:
-  ```bash
-  gcloud run jobs create content-seed \
-    --image us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/content-seed:latest \
-    --region us-central1 \
-    --service-account cloud-run-app-identity@agentic-learning-app-e13cb.iam.gserviceaccount.com \
-    --set-env-vars GCS_PIPELINE_BUCKET=agentic-learning-pipeline \
     --set-secrets DB_PASSWORD=DB_PASSWORD:latest,DB_INSTANCE_CONNECTION_NAME=DB_CONNECTION_NAME:latest \
+    --entrypoint python \
+    --args="seed_db.py" \
     --memory 512Mi \
     --task-timeout 1800 \
     --max-retries 1
@@ -151,7 +147,10 @@ All items below are implemented. No further code changes required.
   ```
   Then run live:
   ```bash
-  gcloud run jobs execute content-seed --region us-central1 --wait
+  gcloud run jobs execute content-seed \
+    --region us-central1 \
+    --args="seed_db.py" \
+    --wait
   ```
   Verify rows in Cloud SQL:
   ```sql
@@ -206,7 +205,10 @@ Only proceed here when Phases 0–3 are fully complete and smoke tests pass.
 
 - [ ] **4.5** Execute the seed job:
   ```bash
-  gcloud run jobs execute content-seed --region us-central1 --wait
+  gcloud run jobs execute content-seed \
+    --region us-central1 \
+    --args="seed_db.py" \
+    --wait
   ```
 
 - [ ] **4.6** Verify data in Cloud SQL:
@@ -242,7 +244,7 @@ Only proceed here when Phases 0–3 are fully complete and smoke tests pass.
 | `config.py` — `gcs_pipeline_bucket` setting | ✅ Done |
 | `pyproject.toml` — `gcs` extras group | ✅ Done |
 | `Dockerfile` — combined generate+embed+seed image | ✅ Done |
-| `Dockerfile.seed` — updated, GCS-aware | ✅ Done |
+| `Dockerfile.seed` — deleted, superseded by combined `Dockerfile` | ✅ Done |
 | `infra/terraform/main.tf` — GCS bucket + IAM | ✅ Done |
 | `infra/scripts/enable_apis.sh` — storage API added | ✅ Done |
 | `infra/cloudbuild/content-generate.yaml` | ✅ Done |

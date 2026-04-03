@@ -188,6 +188,7 @@ Each embedded file shape:
 {
   "lesson_id": "L04",
   "tier": "beginner",
+  "content_hash": "sha256 of the approved JSON — used by seed_db.py for change detection",
   "chunk": {
     "text": "...concatenated lesson text...",
     "embedding": [0.012, -0.034, "...768 floats..."],
@@ -225,16 +226,14 @@ cd infra/terraform && terraform apply
 - `content_chunks` table — lesson text + pgvector embedding (768-dim), with ivfflat index
 - `quiz_questions` table — all 4 question formats, idempotent inserts
 
-### 3b. Build and push the seed job image
+### 3b. Build and push the pipeline image
 
-Run from the **repo root** (Docker build context must include both `content-generation/` and `courses/`):
+The seed job reuses the same image as generate and embed. Build it once from the repo root:
 
 ```bash
-IMAGE=us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/content-seed:latest
-
 gcloud builds submit \
-  --tag "$IMAGE" \
-  --dockerfile content-generation/Dockerfile.seed \
+  --config infra/cloudbuild/content-generate.yaml \
+  --substitutions=COMMIT_SHA=$(git rev-parse --short HEAD) \
   .
 ```
 
@@ -242,21 +241,28 @@ gcloud builds submit \
 
 ```bash
 gcloud run jobs create content-seed \
-  --image "$IMAGE" \
+  --image us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/content-generate:latest \
   --region us-central1 \
   --service-account cloud-run-app-identity@agentic-learning-app-e13cb.iam.gserviceaccount.com \
+  --set-env-vars GCS_PIPELINE_BUCKET=agentic-learning-pipeline \
   --set-secrets DB_PASSWORD=DB_PASSWORD:latest,DB_INSTANCE_CONNECTION_NAME=DB_CONNECTION_NAME:latest \
+  --entrypoint python \
+  --args="seed_db.py" \
   --memory 512Mi \
+  --task-timeout 1800 \
   --max-retries 1
 ```
 
 ### 3d. Execute the seed job
 
 ```bash
-gcloud run jobs execute content-seed --region us-central1 --wait
+gcloud run jobs execute content-seed \
+  --region us-central1 \
+  --args="seed_db.py" \
+  --wait
 ```
 
-All inserts are idempotent — safe to re-run after adding new approved content.
+Seeding is idempotent — safe to re-run after adding new content. Rows are only written when their `content_hash` differs from what is already in the database.
 
 ### Local dry-run (without Cloud SQL)
 
@@ -312,5 +318,5 @@ Settings are loaded from `../.env` via `config.py` (pydantic-settings, `extra="i
 | `infra/sql/001_create_schema.sql` | Full DDL for the 3 content tables (idempotent, re-runnable) |
 | `infra/scripts/apply_schema.sh` | Applies DDL to Cloud SQL via `gcloud sql connect` |
 | `infra/scripts/enable_pgvector.sh` | Enables the pgvector extension (must run before `apply_schema.sh`) |
-| `content-generation/Dockerfile.seed` | Cloud Run Job image for `seed_db.py` (build context = repo root) |
+| `content-generation/Dockerfile` | Combined image for all three pipeline scripts; `content-seed` job overrides entrypoint to `seed_db.py` |
 | `content-generation/pyproject.toml` | Single source of truth for all dependencies; `[seed]` extras for `seed_db.py` |
