@@ -329,6 +329,39 @@ Flags:
 | `--lesson L01` | Validate only lesson L01 |
 | `--tier beginner` | Validate only the beginner tier |
 
+### SQL spot-checks (Cloud SQL Studio)
+
+Connect to `learning_app` as `app_user` and run:
+
+**Row counts per tier**
+```sql
+SELECT tier, COUNT(*) FROM content_chunks GROUP BY tier ORDER BY tier;
+SELECT tier, COUNT(*) FROM quiz_questions GROUP BY tier ORDER BY tier;
+```
+
+**Embedding dimension — should be 768 for every row**
+```sql
+SELECT lesson_id, tier, array_length(embedding::real[], 1) AS dim
+FROM content_chunks
+ORDER BY lesson_id, tier;
+```
+
+**Quiz question format distribution**
+```sql
+SELECT tier, format, COUNT(*)
+FROM quiz_questions
+GROUP BY tier, format
+ORDER BY tier, format;
+```
+
+**Lessons with no content chunk (should return 0 rows)**
+```sql
+SELECT l.lesson_id
+FROM lessons l
+LEFT JOIN content_chunks cc ON l.lesson_id = cc.lesson_id
+WHERE cc.lesson_id IS NULL;
+```
+
 ---
 
 ## Configuration

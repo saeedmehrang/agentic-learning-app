@@ -117,7 +117,7 @@ All items below are implemented. No further code changes required.
     --max-retries 1
   ```
 
-- [ ] **3.4** Smoke-test the generation job on a single lesson:
+- [x] **3.4** Smoke-test the generation job on a single lesson:
   ```bash
   gcloud run jobs execute content-generate \
     --region us-central1 \
@@ -129,7 +129,7 @@ All items below are implemented. No further code changes required.
   - `L01_beginner` entry has `"status": "approved"`
   - `approved/beginner/L01.json` exists: `gsutil ls gs://agentic-learning-pipeline/linux-basics/pipeline/approved/`
 
-- [ ] **3.5** Smoke-test the embed job on L01 Beginner:
+- [x] **3.5** Smoke-test the embed job on L01 Beginner:
   ```bash
   gcloud run jobs execute content-embed \
     --region us-central1 \
@@ -138,7 +138,7 @@ All items below are implemented. No further code changes required.
   ```
   Verify `embedded/beginner/L01.json` in GCS.
 
-- [ ] **3.6** Smoke-test the seed job (dry-run first):
+- [x] **3.6** Smoke-test the seed job (dry-run first):
   ```bash
   gcloud run jobs execute content-seed \
     --region us-central1 \
@@ -248,9 +248,9 @@ Only proceed here when Phases 0–3 are fully complete and smoke tests pass.
 | `infra/terraform/main.tf` — GCS bucket + IAM | ✅ Done |
 | `infra/scripts/enable_apis.sh` — storage API added | ✅ Done |
 | `infra/cloudbuild/content-generate.yaml` | ✅ Done |
-| GCP infra provisioned (`terraform apply`) | ⬜ Phase 0.2 |
-| Images built and pushed | ⬜ Phase 2 |
-| Cloud Run Jobs created | ⬜ Phase 3.1–3.3 |
-| Smoke tests passed | ⬜ Phase 3.4–3.6 |
+| GCP infra provisioned (`terraform apply`) | ✅ Done |
+| Images built and pushed | ✅ Done |
+| Cloud Run Jobs created | ✅ Done |
+| Smoke tests passed | ✅ Done |
 | Full 87-combination run complete | ⬜ Phase 4 |
 | Cloud SQL seeded | ⬜ Phase 4.5–4.6 |
