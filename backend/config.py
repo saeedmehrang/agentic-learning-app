@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Tuple, Type
+from typing import Any, Tuple, Type
 
 from pydantic_settings import (
     BaseSettings,
@@ -50,19 +50,29 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> Tuple[PydanticBaseSettingsSource, ...]:
-        if os.environ.get("APP_ENV") == "production":
-            # Import here to avoid requiring google-cloud-secret-manager in dev
-            from pydantic_settings import GoogleSecretManagerSettingsSource
+        # Pull secrets from Secret Manager via ADC — no plaintext secrets on disk.
+        # Falls back gracefully to env-only if Secret Manager is unreachable (e.g.
+        # unit tests without ADC). env_settings still allows non-secret config overrides.
+        from pydantic_settings import GoogleSecretManagerSettingsSource
 
-            return (
-                init_settings,
-                env_settings,
-                GoogleSecretManagerSettingsSource(
-                    settings_cls,
-                    project_id=os.environ.get("GCP_PROJECT_ID", "agentic-learning-app-e13cb"),
-                ),
-            )
-        return (init_settings, env_settings, dotenv_settings)
+        class _SafeSecretManagerSource(GoogleSecretManagerSettingsSource):
+            """Wraps GoogleSecretManagerSettingsSource to suppress errors in envs
+            where ADC is unavailable (CI, unit tests). Secrets fall through to env vars."""
+
+            def __call__(self) -> dict[str, Any]:  # type: ignore[override]
+                try:
+                    return super().__call__()
+                except Exception:
+                    return {}
+
+        return (
+            init_settings,
+            env_settings,
+            _SafeSecretManagerSource(
+                settings_cls,
+                project_id=os.environ.get("GCP_PROJECT_ID", "agentic-learning-app-e13cb"),
+            ),
+        )
 
 
 settings = Settings()
