@@ -1,33 +1,29 @@
 """
 FastAPI entrypoint for the ADK learning backend.
 
-Session lifecycle
------------------
-1. POST /session/start  → creates an InMemorySession, runs the full 4-agent
-   pipeline via Runner.run_async, collects the final event, and returns
-   SessionStartResponse.
+Session lifecycle (per-turn interactive API)
+--------------------------------------------
+1. POST  /session/start          → ContextAgent only. Returns session_id + context_output.
+2. GET   /session/{id}/lesson    → LessonAgent teaching phase (Turn 1). Returns lesson JSON.
+3. POST  /session/{id}/quiz/answer → LessonAgent quiz evaluation (Turns 2–N). Returns answer eval.
+4. POST  /session/{id}/help      → HelpAgent (max 3 turns, hard-capped). Returns help response.
+5. POST  /session/{id}/complete  → SummaryAgent. Writes Firestore. Returns summary JSON.
 
-HelpAgent conditional routing
-------------------------------
-HelpAgent is only invoked when LessonAgent emits ``trigger_help: true`` in its
-session state (``lesson_output``). The pipeline SequentialAgent carries all 4
-sub_agents, but main.py skips the HelpAgent step when trigger_help is absent or
-false by running a two-phase approach:
+Each agent runs in its own Runner, but all share the same InMemorySessionService so ADK
+session state (output_key values) persists across HTTP calls within a session.
 
-  Phase A — ContextAgent + LessonAgent (via a sub-pipeline or direct runner call)
-  Phase B — HelpAgent only when trigger_help is true (via HelpAgentRunner)
-  Phase C — SummaryAgent always
-
-For the initial implementation we run the full SequentialAgent pipeline and rely
-on the HelpAgent's system prompt + HelpAgentRunner to handle the conditional
-gracefully. A stricter split can be added in Phase 5 once session state routing
-is fully mapped out.
+HelpAgent hard cap
+------------------
+HelpAgentRunner (imported from agents.help_agent) enforces the 3-turn limit in code.
+The /session/{id}/help endpoint checks is_at_cap() before calling the runner.
 """
 from __future__ import annotations
 
 import json
 import logging
+import uuid
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator
 
 from fastapi import FastAPI, HTTPException
@@ -36,24 +32,65 @@ from google.adk.sessions import InMemorySessionService
 from google.genai import types as genai_types
 from pydantic import BaseModel
 
+from agents.context_agent import context_agent
+from agents.help_agent import HelpAgentRunner, help_agent
+from agents.lesson_agent import lesson_agent
+from agents.summary_agent import summary_agent
 from config import settings
 from logging_config import configure_logging
-from pipeline import pipeline
 
 configure_logging()
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# ADK runner + session service — created once at module startup
+# ADK session service — shared across all per-agent runners so that output_key
+# values written by one agent are visible to the next agent in the same session.
 # ---------------------------------------------------------------------------
 
 _session_service = InMemorySessionService()
 
-_runner = Runner(
-    agent=pipeline,
+_context_runner = Runner(
+    agent=context_agent,
     app_name="agentic_learning_app",
     session_service=_session_service,
 )
+_lesson_runner = Runner(
+    agent=lesson_agent,
+    app_name="agentic_learning_app",
+    session_service=_session_service,
+)
+_help_runner = Runner(
+    agent=help_agent,
+    app_name="agentic_learning_app",
+    session_service=_session_service,
+)
+_summary_runner = Runner(
+    agent=summary_agent,
+    app_name="agentic_learning_app",
+    session_service=_session_service,
+)
+
+
+# ---------------------------------------------------------------------------
+# In-memory session store (dev/interactive — not for prod scale-out)
+# Keyed by session_id. Holds inter-turn data the HTTP layer needs.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SessionData:
+    session_id: str
+    uid: str
+    adk_session_id: str          # ADK InMemorySession id (may differ from session_id)
+    context_output: dict[str, Any] = field(default_factory=dict)
+    lesson_output: dict[str, Any] = field(default_factory=dict)
+    quiz_questions_asked: int = 0
+    help_runner: HelpAgentRunner = field(default_factory=HelpAgentRunner)
+    phase: str = "context"       # context | lesson | quiz | help | complete
+
+
+_sessions: dict[str, SessionData] = {}
+
 
 # ---------------------------------------------------------------------------
 # FastAPI app
@@ -88,77 +125,394 @@ class SessionStartRequest(BaseModel):
 class SessionStartResponse(BaseModel):
     status: str
     session_id: str
+    context_output: dict[str, Any]
+
+
+class LessonResponse(BaseModel):
+    lesson_text: str
+    character_emotion_state: str
+    key_concepts: list[str]
+
+
+class QuizQuestionResponse(BaseModel):
+    question_text: str
+    format: str
+    options: list[str]
+    character_emotion_state: str
+
+
+class QuizAnswerRequest(BaseModel):
+    answer: str
+
+
+class QuizAnswerResponse(BaseModel):
+    correct: bool
+    explanation: str
+    concept_score_delta: float
+    character_emotion_state: str
+    trigger_help: bool = False
+
+
+class HelpRequest(BaseModel):
+    message: str
+
+
+class HelpResponse(BaseModel):
+    resolved: bool
+    character_emotion_state: str | None = None
+    gemini_handoff_prompt: str | None = None
+    turns_remaining: int = 0
+
+
+class SessionCompleteResponse(BaseModel):
+    status: str
+    summary: dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
-# Session start endpoint
+# Helper: run a single agent turn and return the last output text
+# ---------------------------------------------------------------------------
+
+
+async def _run_agent_turn(
+    runner: Runner,
+    uid: str,
+    adk_session_id: str,
+    message: str,
+) -> str:
+    """Run one agent turn and return the final response text."""
+    new_message = genai_types.Content(
+        role="user",
+        parts=[genai_types.Part(text=message)],
+    )
+    final_text = ""
+    async for event in runner.run_async(
+        user_id=uid,
+        session_id=adk_session_id,
+        new_message=new_message,
+    ):
+        if event.is_final_response():
+            parts = getattr(event.content, "parts", []) or []
+            if parts:
+                final_text = getattr(parts[0], "text", "") or ""
+    return final_text
+
+
+def _parse_json_response(raw: str, session_id: str, context: str) -> dict[str, Any]:
+    """Parse JSON from agent output; raise HTTPException on failure."""
+    # Strip markdown code fences if present
+    text = raw.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        text = "\n".join(lines[1:-1]) if len(lines) > 2 else text
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, ValueError) as exc:
+        logger.error(
+            "Agent returned non-JSON output",
+            extra={"session_id": session_id, "context": context, "raw": raw[:500]},
+        )
+        raise HTTPException(status_code=502, detail=f"Agent output parse error: {context}") from exc
+
+
+def _get_session(session_id: str) -> SessionData:
+    """Retrieve session or raise 404."""
+    data = _sessions.get(session_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return data
+
+
+# ---------------------------------------------------------------------------
+# POST /session/start
 # ---------------------------------------------------------------------------
 
 
 @app.post("/session/start", response_model=SessionStartResponse)
 async def session_start(request: SessionStartRequest) -> SessionStartResponse:
     """
-    Start a new learning session for the given learner UID.
-
-    Steps:
-    1. Create an in-memory session keyed by the learner UID.
-    2. Build a user Content message carrying the UID so agents can call their
-       tools (e.g. read_learner_context).
-    3. Run the pipeline via Runner.run_async and drain the event stream.
-    4. Return the session_id so the Flutter client can reference it in follow-up
-       calls.
-
-    The runner executes ContextAgent → LessonAgent → HelpAgent (conditional) →
-    SummaryAgent. HelpAgent is only meaningfully active when LessonAgent sets
-    trigger_help: true in session state; otherwise it passes through without
-    generating substantive output.
+    Start a new learning session. Runs ContextAgent to determine the next concept.
+    Returns session_id and context_output (concept, tier, character, session goal).
     """
+    session_id = str(uuid.uuid4())
     try:
-        # Step 1 — create session
-        # TODO: verify ADK Runner API — InMemorySessionService.create_session is
-        # synchronous in the current SDK version; switch to await if it becomes async.
-        session = _session_service.create_session(
+        adk_session = _session_service.create_session(
             app_name="agentic_learning_app",
             user_id=request.uid,
         )
-        session_id: str = session.id
+        adk_session_id: str = adk_session.id
+
+        raw = await _run_agent_turn(
+            _context_runner, request.uid, adk_session_id, request.uid
+        )
+        context_output = _parse_json_response(raw, session_id, "context_agent")
+
+        _sessions[session_id] = SessionData(
+            session_id=session_id,
+            uid=request.uid,
+            adk_session_id=adk_session_id,
+            context_output=context_output,
+            phase="lesson",
+        )
 
         logger.info(
-            "Session created",
-            extra={"uid": request.uid, "session_id": session_id},
+            "Session started",
+            extra={
+                "session_id": session_id,
+                "uid": request.uid,
+                "concept": context_output.get("next_concept_id"),
+                "tier": context_output.get("difficulty_tier"),
+            },
         )
-
-        # Step 2 — build the initial user message
-        # The UID is passed as text so ContextAgent can extract it and call
-        # read_learner_context(uid=...).
-        new_message = genai_types.Content(
-            role="user",
-            parts=[genai_types.Part(text=request.uid)],
-        )
-
-        # Step 3 — run pipeline and drain events
-        final_event: Any = None
-        # TODO: verify ADK Runner API — run_async returns an AsyncGenerator[Event, None]
-        async for event in _runner.run_async(
-            user_id=request.uid,
+        return SessionStartResponse(
+            status="ok",
             session_id=session_id,
-            new_message=new_message,
-        ):
-            if event.is_final_response():
-                final_event = event
+            context_output=context_output,
+        )
 
-        if final_event is not None:
-            _log_pipeline_completion(session_id=session_id, event=final_event)
-
-        return SessionStartResponse(status="ok", session_id=session_id)
-
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(
-            "Session start failed",
-            extra={"uid": request.uid, "error": str(exc)},
-            exc_info=True,
+            "Session start failed", extra={"uid": request.uid, "error": str(exc)}, exc_info=True
         )
         raise HTTPException(status_code=500, detail="Session initialisation failed") from exc
+
+
+# ---------------------------------------------------------------------------
+# GET /session/{session_id}/lesson
+# ---------------------------------------------------------------------------
+
+
+@app.get("/session/{session_id}/lesson")
+async def get_lesson(session_id: str) -> LessonResponse:
+    """
+    Deliver the lesson for this session (LessonAgent teaching phase, Turn 1).
+    Must be called after /session/start. Returns lesson text, emotion state, key concepts.
+    """
+    data = _get_session(session_id)
+    if data.phase != "lesson":
+        raise HTTPException(
+            status_code=409, detail=f"Session phase is '{data.phase}', expected 'lesson'"
+        )
+
+    ctx = data.context_output
+    prompt = (
+        f"concept_id={ctx.get('next_concept_id')} "
+        f"difficulty_tier={ctx.get('difficulty_tier')} "
+        f"module_character_id={ctx.get('module_character_id')} "
+        f"session_goal={ctx.get('session_goal')}"
+    )
+
+    try:
+        raw = await _run_agent_turn(_lesson_runner, data.uid, data.adk_session_id, prompt)
+        parsed = _parse_json_response(raw, session_id, "lesson_agent_teaching")
+        data.lesson_output = parsed
+        data.phase = "quiz"
+
+        return LessonResponse(
+            lesson_text=parsed.get("lesson_text", ""),
+            character_emotion_state=parsed.get("character_emotion_state", "teaching"),
+            key_concepts=parsed.get("key_concepts", []),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(
+            "Lesson delivery failed",
+            extra={"session_id": session_id, "error": str(exc)},
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail="Lesson delivery failed") from exc
+
+
+# ---------------------------------------------------------------------------
+# GET /session/{session_id}/quiz/question
+# ---------------------------------------------------------------------------
+
+
+@app.get("/session/{session_id}/quiz/question")
+async def get_quiz_question(session_id: str) -> QuizQuestionResponse:
+    """
+    Request the next quiz question from LessonAgent (quiz phase).
+    Must be called after /lesson. Returns one question per call.
+    """
+    data = _get_session(session_id)
+    if data.phase not in ("quiz", "help"):
+        raise HTTPException(
+            status_code=409, detail=f"Session phase is '{data.phase}', expected 'quiz'"
+        )
+
+    try:
+        raw = await _run_agent_turn(
+            _lesson_runner, data.uid, data.adk_session_id, "next question"
+        )
+        parsed = _parse_json_response(raw, session_id, "lesson_agent_quiz_question")
+        data.quiz_questions_asked += 1
+
+        return QuizQuestionResponse(
+            question_text=parsed.get("question_text", ""),
+            format=parsed.get("format", "mc"),
+            options=parsed.get("options", []),
+            character_emotion_state=parsed.get("character_emotion_state", "curious"),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(
+            "Quiz question failed",
+            extra={"session_id": session_id, "error": str(exc)},
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail="Quiz question failed") from exc
+
+
+# ---------------------------------------------------------------------------
+# POST /session/{session_id}/quiz/answer
+# ---------------------------------------------------------------------------
+
+
+@app.post("/session/{session_id}/quiz/answer")
+async def submit_quiz_answer(session_id: str, request: QuizAnswerRequest) -> QuizAnswerResponse:
+    """
+    Submit a quiz answer to LessonAgent and get evaluation.
+    If trigger_help is true in the response, call /help next.
+    """
+    data = _get_session(session_id)
+    if data.phase not in ("quiz", "help"):
+        raise HTTPException(
+            status_code=409, detail=f"Session phase is '{data.phase}', expected 'quiz'"
+        )
+
+    try:
+        raw = await _run_agent_turn(
+            _lesson_runner, data.uid, data.adk_session_id, request.answer
+        )
+        parsed = _parse_json_response(raw, session_id, "lesson_agent_answer_eval")
+
+        trigger_help = bool(parsed.get("trigger_help", False))
+        if trigger_help:
+            data.phase = "help"
+
+        return QuizAnswerResponse(
+            correct=bool(parsed.get("correct", False)),
+            explanation=parsed.get("explanation", ""),
+            concept_score_delta=float(parsed.get("concept_score_delta", 0.0)),
+            character_emotion_state=parsed.get("character_emotion_state", "encouraging"),
+            trigger_help=trigger_help,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(
+            "Quiz answer failed",
+            extra={"session_id": session_id, "error": str(exc)},
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail="Quiz answer evaluation failed") from exc
+
+
+# ---------------------------------------------------------------------------
+# POST /session/{session_id}/help
+# ---------------------------------------------------------------------------
+
+
+@app.post("/session/{session_id}/help")
+async def help_turn(session_id: str, request: HelpRequest) -> HelpResponse:
+    """
+    Send a message to HelpAgent. Hard-capped at 3 turns.
+    On turn 3 unresolved: returns gemini_handoff_prompt.
+    After resolution, session phase returns to 'quiz'.
+    """
+    data = _get_session(session_id)
+    if data.phase != "help":
+        raise HTTPException(
+            status_code=409, detail=f"Session phase is '{data.phase}', expected 'help'"
+        )
+
+    hr = data.help_runner
+    if hr.is_at_cap():
+        raise HTTPException(status_code=409, detail="HelpAgent turn cap reached (3/3)")
+
+    try:
+        hr.increment_turn()
+        raw = await _run_agent_turn(_help_runner, data.uid, data.adk_session_id, request.message)
+        parsed = _parse_json_response(raw, session_id, "help_agent")
+
+        resolved = bool(parsed.get("resolved", False))
+        at_cap = hr.is_at_cap()
+
+        if resolved or at_cap:
+            hr.log_resolution(resolved=resolved)
+            data.phase = "quiz"  # resume quiz after help
+
+        turns_remaining = max(0, 3 - hr.turn_count)
+
+        # Privacy: never log handoff prompt content
+        handoff_prompt = parsed.get("gemini_handoff_prompt") if not resolved else None
+
+        return HelpResponse(
+            resolved=resolved,
+            character_emotion_state=parsed.get("character_emotion_state"),
+            gemini_handoff_prompt=handoff_prompt,
+            turns_remaining=turns_remaining,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(
+            "Help turn failed",
+            extra={"session_id": session_id, "error": str(exc)},
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail="Help turn failed") from exc
+
+
+# ---------------------------------------------------------------------------
+# POST /session/{session_id}/complete
+# ---------------------------------------------------------------------------
+
+
+@app.post("/session/{session_id}/complete")
+async def complete_session(session_id: str) -> SessionCompleteResponse:
+    """
+    Run SummaryAgent to write session record + FSRS updates to Firestore.
+    Returns the session summary JSON.
+    """
+    data = _get_session(session_id)
+
+    # Build a summary prompt from what we know about the session
+    ctx = data.context_output
+    prompt = (
+        f"uid={data.uid} "
+        f"lesson_id={ctx.get('next_concept_id')} "
+        f"tier_used={ctx.get('difficulty_tier')} "
+        f"quiz_questions_asked={data.quiz_questions_asked} "
+        f"help_triggered={data.phase == 'help' or data.help_runner.turn_count > 0} "
+        f"gemini_handoff_used={data.help_runner.turn_count >= 3}"
+    )
+
+    try:
+        raw = await _run_agent_turn(_summary_runner, data.uid, data.adk_session_id, prompt)
+        parsed = _parse_json_response(raw, session_id, "summary_agent")
+
+        data.phase = "complete"
+
+        _log_summary_completion(session_id=session_id, parsed=parsed)
+
+        # Clean up session from memory
+        del _sessions[session_id]
+
+        return SessionCompleteResponse(status="ok", summary=parsed)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(
+            "Session complete failed",
+            extra={"session_id": session_id, "error": str(exc)},
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail="Session completion failed") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -166,51 +520,7 @@ async def session_start(request: SessionStartRequest) -> SessionStartResponse:
 # ---------------------------------------------------------------------------
 
 
-def _log_pipeline_completion(*, session_id: str, event: Any) -> None:
-    """
-    Log the final pipeline event at INFO level.
-
-    Privacy constraint: never log gemini_handoff_prompt content — log the boolean
-    gemini_handoff_used only. This function inspects summary_output if present and
-    strips any handoff prompt text before logging.
-    """
-    try:
-        content = event.content
-        if content is None:
-            return
-        # Extract text from the first part if available
-        parts = getattr(content, "parts", []) or []
-        if not parts:
-            return
-        raw_text: str = getattr(parts[0], "text", "") or ""
-        if not raw_text:
-            return
-
-        # Parse JSON to enforce privacy — log only safe scalar fields
-        try:
-            parsed: dict[str, Any] = json.loads(raw_text)
-        except (json.JSONDecodeError, ValueError):
-            # Non-JSON final event (e.g. plain text from an agent); log length only
-            logger.info(
-                "Pipeline completed (non-JSON final event)",
-                extra={"session_id": session_id, "output_length": len(raw_text)},
-            )
-            return
-
-        # Strip gemini_handoff_prompt — log only the boolean flag
-        safe: dict[str, Any] = {
-            k: v
-            for k, v in parsed.items()
-            if k != "gemini_handoff_prompt"
-        }
-        logger.info(
-            "Pipeline completed",
-            extra={"session_id": session_id, "summary": safe},
-        )
-
-    except Exception:
-        # Never let logging failures surface to the caller
-        logger.warning(
-            "Could not log pipeline completion event",
-            extra={"session_id": session_id},
-        )
+def _log_summary_completion(*, session_id: str, parsed: dict[str, Any]) -> None:
+    """Log summary fields. Privacy: never log gemini_handoff_prompt content."""
+    safe = {k: v for k, v in parsed.items() if k != "gemini_handoff_prompt"}
+    logger.info("Session completed", extra={"session_id": session_id, "summary": safe})
