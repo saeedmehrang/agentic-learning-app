@@ -1,37 +1,32 @@
 # Dev Chat — Local Pipeline Test Interface
 
-A Streamlit web app for interactively testing the full 4-agent pipeline
-(ContextAgent → LessonAgent → HelpAgent → SummaryAgent) against the real
-Cloud SQL and Firestore instances before the Flutter app is built.
+A Streamlit web app for interactively testing the full 4-agent pipeline 
+(ContextAgent → LessonAgent → HelpAgent → SummaryAgent) against real 
+Cloud SQL and Firestore instances.
 
-**Why this exists:** Watching the pipeline run end-to-end in a browser reveals
-the natural shape of the content — lesson text length, quiz question variety,
-HelpAgent dialogue pacing, summary output — which directly informs Flutter UI
-and UX decisions.
+**Why this exists:** It reveals the natural shape of the pipeline content—lesson length, quiz variety, HelpAgent dialogue, and summary output—informing Flutter UI and UX decisions before frontend development begins.
 
 ---
 
 ## Prerequisites
 
-All commands run on the host machine (not the devcontainer). You need:
-
-- `gcloud` CLI authenticated: `gcloud auth login`
-- Application Default Credentials set up (one-time):
+- **Python 3.13+** and **uv** installed.
+- `gcloud` CLI authenticated: `gcloud auth login`.
+- Application Default Credentials (ADC) configured:
   ```bash
   gcloud auth application-default login
   gcloud auth application-default set-quota-project agentic-learning-app-e13cb
   ```
-- `cloud-sql-proxy` installed ([download](https://cloud.google.com/sql/docs/postgres/sql-proxy))
-- Python 3.11+ and `pip`
 
----
+  - `cloud-sql-proxy` installed ([installation guide](https://cloud.google.com/sql/docs/postgres/sql-proxy)).
 
-## Start-up sequence (3 terminals)
+-----
+
+## Start-up Sequence (3 Terminals)
 
 ### Terminal 1 — Cloud SQL Auth Proxy
 
-Fetch the connection name from Secret Manager (no local secrets needed) and
-start the proxy:
+Fetch the connection name from Secret Manager and start the proxy on the default PostgreSQL port:
 
 ```bash
 CONNECTION_NAME=$(gcloud secrets versions access latest \
@@ -41,108 +36,74 @@ CONNECTION_NAME=$(gcloud secrets versions access latest \
 cloud-sql-proxy "$CONNECTION_NAME" --port=5432
 ```
 
-Leave this running. The backend connects to Cloud SQL through it.
+### Terminal 2 — FastAPI Backend
 
-### Terminal 2 — FastAPI backend
+Navigate to the backend directory and start the server:
 
 ```bash
 cd backend
 uv run uvicorn main:app --host 0.0.0.0 --port 8080 --reload
 ```
 
-Verify it's up:
-```bash
-curl http://localhost:8080/health
-# → {"status":"ok"}
-```
+*Verify at `http://localhost:8080/health`*
 
-### Terminal 3 — Streamlit dev chat
+### Terminal 3 — Streamlit Dev Chat
+
+Navigate to the `dev_chat` directory, sync dependencies, and run the app:
 
 ```bash
 cd dev_chat
-pip install -r requirements.txt
-streamlit run app.py
+uv sync
+uv run streamlit run app.py
 ```
 
-Open [localhost:8501](http://localhost:8501) in your browser.
+Open [localhost:3000](https://www.google.com/search?q=http://localhost:3000) in your browser.
 
----
+-----
 
-## How to run a session
+## How to Run a Session
 
-1. **Enter a learner UID** in the text field (default: `test-user-dev`) and click **Start Session**.
-   - ContextAgent reads Firestore for this UID and picks the next concept.
-   - New learner → picks L01 (beginner). Returning learner → picks next scheduled concept.
+1.  **Start Session:** Enter a **Learner UID** (e.g., `test-user-dev`). The ContextAgent will fetch/create the learner profile and determine the next concept based on FSRS logic.
+2.  **📖 Load Lesson:** The LessonAgent retrieves content from Cloud SQL and delivers the teaching material.
+3.  **🎯 Next Question:** Generates a quiz question. The UI adapts to the format (Multiple Choice, True/False, or Fill-in-the-blank).
+4.  **Help Trigger:** If you answer incorrectly twice, the **HelpAgent** activates automatically. You have **3 turns** to resolve your confusion.
+5.  **Gemini Handoff:** If the 3-turn limit is reached without resolution, a pre-filled Gemini prompt is generated for deeper 1-on-1 tutoring.
+6.  **✅ Finish Session:** The SummaryAgent calculates scores, updates FSRS data in Firestore, and logs the session.
 
-2. Click **📖 Load Lesson** — LessonAgent fetches content from Cloud SQL and delivers the lesson.
-
-3. Click **🎯 Next Question** — LessonAgent generates a quiz question.
-   - Multiple choice → radio buttons
-   - True/False → two buttons
-   - Fill-in-the-blank / command → radio buttons from options
-
-4. Select your answer and submit. LessonAgent evaluates and shows feedback.
-
-5. **Answer wrong twice on the same concept** → HelpAgent activates automatically.
-   - You get a chat input to ask HelpAgent questions (3 turns max).
-   - Turn 3 unresolved → a Gemini handoff card appears with a pre-filled prompt.
-
-6. Click **✅ Finish Session** → SummaryAgent writes the session record and FSRS
-   scores to Firestore.
-
-7. Click **🔄 New Session** to start over (same or different UID).
-
----
+-----
 
 ## Sidebar — Session State Inspector
 
-The left sidebar shows live state on every turn:
-
-| Field | What it tells you |
+| Field | Description |
 |---|---|
-| Phase badge | Current pipeline phase (LESSON / QUIZ / HELP / COMPLETE) |
-| Concept / Tier / Character | ContextAgent output |
-| Session Goal | What the agent decided to teach |
-| Help turns remaining | 0–3 counter; turns red when ≤1 |
-| Last Agent Response | Raw JSON expander for debugging |
-| Backend status | Green = online, red = unreachable |
+| **Phase Badge** | Tracks `LESSON`, `QUIZ`, `HELP`, or `COMPLETE`. |
+| **Context Output** | Real-time metadata: Concept ID, Difficulty Tier, and Character. |
+| **Help Turns** | Counter for HelpAgent interactions (turns red at $\leq 1$). |
+| **Raw JSON** | Expandable view of the last agent's complete payload for debugging. |
+| **Backend Health** | Live heartbeat check of the FastAPI server. |
 
----
+-----
 
-## Testing specific scenarios
+## Testing Scenarios
 
-**New learner flow:**
-Use a UID that has no Firestore document. ContextAgent defaults to L01, beginner tier.
+  * **New Learner:** Use a unique UID to trigger the "Beginner" (L01) path.
+  * **Returning Learner:** Use an existing UID to test if FSRS correctly schedules the next concept.
+  * **Tier Testing:** Manually edit a learner document in Firestore to `intermediate` or `advanced` to verify the LessonAgent pulls the correct difficulty tier.
+  * **Reset:** Delete the learner document in the Firebase Console to wipe progress.
 
-**Returning learner / FSRS scheduling:**
-Complete a session with `test-user-dev`, then start a new session with the same UID.
-ContextAgent should pick the next concept based on FSRS `next_review_at`.
+-----
 
-**HelpAgent 3-turn cap:**
-Answer incorrectly twice. In the help chat, send 3 messages without resolving.
-Turn 3 exits with the Gemini handoff card.
+## Configuration
 
-**Different tiers:**
-Create learner documents in Firestore with `difficulty_tier: intermediate` or `advanced`
-to test content retrieval at different tiers. Currently only L01 and L02 are seeded
-for all 3 tiers.
-
-**Reset a learner:**
-Delete `learners/test-user-dev` from the Firebase Console to wipe all progress
-and test the new-learner path again.
-
----
-
-## Passing a custom backend URL
+To point the interface at a remote or different backend:
 
 ```bash
-BACKEND_URL=http://localhost:9090 streamlit run app.py
+BACKEND_URL=http://your-ip:8080 uv run streamlit run app.py
 ```
 
----
+```
 
-## What this is NOT
-
-- Not a production UI — the session store is in-memory and resets on backend restart.
-- Not the Flutter app — character assets are not shown, animations are not present.
-- Not a load test — one session at a time is the intended usage.
+### Quick Checks for your `app.py`:
+1.  **Backend Health Check:** Your health check in `render_sidebar` uses `requests.get(f"{BACKEND_URL}/health")`. Ensure your FastAPI backend actually has a `@app.get("/health")` endpoint, or that will stay red.
+2.  **Help Agent Response:** Your `_format_help_response` function currently returns a hardcoded string. Since your HelpAgent likely returns a `response_text` or similar field in the JSON, make sure to update that function to pull the actual string so you can see the agent's explanation!
+```
