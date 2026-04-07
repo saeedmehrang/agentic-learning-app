@@ -128,7 +128,8 @@ RUN curl -fsSL "https://github.com/boyter/scc/releases/download/v${SCC_VERSION}/
 RUN npm install -g \
         firebase-tools@15.10.0 \
         jscpd@4.0.8 \
-        knip@5.86.0 && \
+        knip@5.86.0 \
+        @google/gemini-cli@latest && \
     npm cache clean --force
 
 RUN npm install -g @anthropic-ai/claude-code@2.1.76 && npm cache clean --force
