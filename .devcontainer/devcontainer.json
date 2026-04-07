@@ -28,7 +28,7 @@
   "postCreateCommand": "bash .devcontainer/post-create.sh",
   "forwardPorts": [
     3000,
-    8000,
+    8080,
     5432,
     9099
   ],
@@ -37,7 +37,7 @@
       "label": "Dev server",
       "onAutoForward": "silent"
     },
-    "8000": {
+    "8080": {
       "label": "ADK backend",
       "onAutoForward": "silent"
     },
