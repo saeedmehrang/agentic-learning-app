@@ -9,6 +9,29 @@
 #                      or can be entered manually.
 #
 # Run after `tf.sh apply` for Phase 0.3 to push DB_CONNECTION_NAME.
+#
+# PASSWORD ROTATION
+# -----------------
+# The password is never stored locally or printed. To rotate:
+#
+#   cd infra/terraform
+#   terraform taint random_password.db_password
+#   terraform taint google_secret_manager_secret_version.db_password
+#   TF_VAR_google_oauth_client_secret=$(gcloud secrets versions access latest \
+#     --secret=GOOGLE_OAUTH_CLIENT_SECRET --project=$GCP_PROJECT_ID) \
+#   terraform apply \
+#     -target=random_password.db_password \
+#     -target=google_secret_manager_secret_version.db_password \
+#     -target=google_sql_user.app_user \
+#     -auto-approve
+#
+# Terraform generates a new password, updates Cloud SQL, and writes a new
+# Secret Manager version — all as sensitive values, never echoed.
+# Verify with: cd backend && uv run python3 -c "from config import settings;
+#   import psycopg2; psycopg2.connect(host=settings.db_host,
+#   port=settings.db_port, dbname=settings.db_name, user=settings.db_user,
+#   password=settings.db_password, sslmode='disable').close();
+#   print('DB connection OK')"
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
