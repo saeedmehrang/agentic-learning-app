@@ -55,21 +55,19 @@ def _init_state() -> None:
             st.session_state[k] = v
 
 
-_init_state()
-
 # ---------------------------------------------------------------------------
 # API helpers
 # ---------------------------------------------------------------------------
 
 
-def _post(path: str, body: dict | None = None, timeout: int = 60) -> dict:
+def _post(path: str, body: dict | None = None, timeout: int = 120) -> dict:
     url = f"{BACKEND_URL}{path}"
     resp = requests.post(url, json=body or {}, timeout=timeout)
     resp.raise_for_status()
     return resp.json()
 
 
-def _get(path: str, timeout: int = 60) -> dict:
+def _get(path: str, timeout: int = 120) -> dict:
     url = f"{BACKEND_URL}{path}"
     resp = requests.get(url, timeout=timeout)
     resp.raise_for_status()
@@ -471,6 +469,7 @@ def render_input_area() -> None:
 
 
 def main() -> None:
+    _init_state()
     render_sidebar()
 
     st.title("🤖 Agentic Learning — Dev Chat")
