@@ -39,6 +39,7 @@ def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
             dbname=settings.db_name,
             user=settings.db_user,
             password=settings.db_password,
+            sslmode="disable",  # Cloud SQL proxy handles TLS; no second SSL layer needed
         )
         logger.info("DB connection pool initialized")
     return _pool

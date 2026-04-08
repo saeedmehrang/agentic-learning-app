@@ -36,10 +36,10 @@ class Settings(BaseSettings):
     app_env: str = "development"
 
     # Model assignments (fixed per CLAUDE.md — do not change)
-    context_agent_model: str = "gemini-2.5-flash-lite-preview-06-17"
-    lesson_agent_model: str = "gemini-2.5-flash-preview-05-20"
-    help_agent_model: str = "gemini-2.5-flash-lite-preview-06-17"
-    summary_agent_model: str = "gemini-2.5-flash-lite-preview-06-17"
+    context_agent_model: str = "gemini-2.5-flash-lite"
+    lesson_agent_model: str = "gemini-2.5-flash"
+    help_agent_model: str = "gemini-2.5-flash-lite"
+    summary_agent_model: str = "gemini-2.5-flash-lite"
 
     @classmethod
     def settings_customise_sources(
@@ -70,7 +70,8 @@ class Settings(BaseSettings):
             env_settings,
             _SafeSecretManagerSource(
                 settings_cls,
-                project_id=os.environ.get("GCP_PROJECT_ID", "agentic-learning-app-e13cb"),
+                project_id=os.environ.get("GCP_PROJECT_ID") or "agentic-learning-app-e13cb",
+                case_sensitive=False,
             ),
         )
 

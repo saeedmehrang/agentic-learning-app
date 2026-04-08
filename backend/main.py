@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -38,6 +39,12 @@ from agents.lesson_agent import lesson_agent
 from agents.summary_agent import summary_agent
 from config import settings
 from logging_config import configure_logging
+
+# ADK / google-genai SDK reads these from os.environ directly (not pydantic settings).
+# Set them here so that .env values are honoured even when not exported to the shell.
+os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "1")
+os.environ.setdefault("GOOGLE_CLOUD_PROJECT", settings.gcp_project_id)
+os.environ.setdefault("GOOGLE_CLOUD_LOCATION", settings.gcp_location)
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -236,7 +243,7 @@ async def session_start(request: SessionStartRequest) -> SessionStartResponse:
     """
     session_id = str(uuid.uuid4())
     try:
-        adk_session = _session_service.create_session(
+        adk_session = await _session_service.create_session(
             app_name="agentic_learning_app",
             user_id=request.uid,
         )
