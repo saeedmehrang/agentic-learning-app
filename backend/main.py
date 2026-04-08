@@ -92,6 +92,8 @@ class SessionData:
     context_output: dict[str, Any] = field(default_factory=dict)
     lesson_output: dict[str, Any] = field(default_factory=dict)
     quiz_questions_asked: int = 0
+    quiz_correct: int = 0        # running count of correct answers this session
+    session_start_ts: float = field(default_factory=lambda: __import__("time").time())
     help_runner: HelpAgentRunner = field(default_factory=HelpAgentRunner)
     phase: str = "context"       # context | lesson | quiz | help | complete
 
@@ -207,19 +209,29 @@ async def _run_agent_turn(
 
 def _parse_json_response(raw: str, session_id: str, context: str) -> dict[str, Any]:
     """Parse JSON from agent output; raise HTTPException on failure."""
-    # Strip markdown code fences if present
     text = raw.strip()
+    # Strip markdown code fences if present
     if text.startswith("```"):
         lines = text.splitlines()
         text = "\n".join(lines[1:-1]) if len(lines) > 2 else text
+    # Try direct parse first
     try:
         return json.loads(text)
-    except (json.JSONDecodeError, ValueError) as exc:
-        logger.error(
-            "Agent returned non-JSON output",
-            extra={"session_id": session_id, "context": context, "raw": raw[:500]},
-        )
-        raise HTTPException(status_code=502, detail=f"Agent output parse error: {context}") from exc
+    except (json.JSONDecodeError, ValueError):
+        pass
+    # Fall back: extract the first {...} JSON object from prose output
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            return json.loads(text[start : end + 1])
+        except (json.JSONDecodeError, ValueError):
+            pass
+    logger.error(
+        "Agent returned non-JSON output",
+        extra={"session_id": session_id, "context": context, "raw": raw[:500]},
+    )
+    raise HTTPException(status_code=502, detail=f"Agent output parse error: {context}")
 
 
 def _get_session(session_id: str) -> SessionData:
@@ -401,6 +413,9 @@ async def submit_quiz_answer(session_id: str, request: QuizAnswerRequest) -> Qui
         if trigger_help:
             data.phase = "help"
 
+        if parsed.get("correct"):
+            data.quiz_correct += 1
+
         return QuizAnswerResponse(
             correct=bool(parsed.get("correct", False)),
             explanation=parsed.get("explanation", ""),
@@ -488,15 +503,25 @@ async def complete_session(session_id: str) -> SessionCompleteResponse:
     """
     data = _get_session(session_id)
 
-    # Build a summary prompt from what we know about the session
+    # Build a summary prompt from session data
+    import time as _time
     ctx = data.context_output
+    concept_id = ctx.get("next_concept_id", "L01")
+    total_q = data.quiz_questions_asked
+    correct_q = data.quiz_correct
+    score = round(correct_q / total_q, 2) if total_q > 0 else 0.0
+    time_on_task = int(_time.time() - data.session_start_ts)
+    help_triggered = data.phase == "help" or data.help_runner.turn_count > 0
+    handoff_used = data.help_runner.turn_count >= 3
     prompt = (
-        f"uid={data.uid} "
-        f"lesson_id={ctx.get('next_concept_id')} "
-        f"tier_used={ctx.get('difficulty_tier')} "
-        f"quiz_questions_asked={data.quiz_questions_asked} "
-        f"help_triggered={data.phase == 'help' or data.help_runner.turn_count > 0} "
-        f"gemini_handoff_used={data.help_runner.turn_count >= 3}"
+        f"Summarise this session.\n"
+        f"learner_uid: {data.uid}\n"
+        f"lesson_id: {concept_id}\n"
+        f"tier_used: {ctx.get('difficulty_tier', 'beginner')}\n"
+        f"quiz_score_for_{concept_id}: {score}\n"
+        f"time_on_task_seconds: {time_on_task}\n"
+        f"help_triggered: {help_triggered}\n"
+        f"gemini_handoff_used: {handoff_used}"
     )
 
     try:

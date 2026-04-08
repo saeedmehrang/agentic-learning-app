@@ -4,8 +4,8 @@ schedules via the run_fsrs tool.
 
 Responsibilities:
 - Call run_fsrs for each concept touched during the session
-- Write a session record to Firestore: learners/{uid}/sessions/{session_id}
-- Write per-concept mastery documents to Firestore: learners/{uid}/concepts/{concept_id}
+- Write a session record to Firestore: learners/UID/sessions/SESSION_ID
+- Write per-concept mastery documents to Firestore: learners/UID/concepts/CONCEPT_ID
 - Output a structured JSON summary of the session
 - NEVER write gemini_handoff_prompt content to Firestore — gemini_handoff_used is
   a boolean flag only (privacy constraint)
@@ -55,7 +55,8 @@ Use the quiz_scores dict to determine outcomes: a score >= 0.7 is "correct",
 below 0.7 is "incorrect".
 
 ## Step 2 — Write session record
-Write a Firestore document at: learners/{uid}/sessions/{session_id}
+Write a Firestore document at path: learners/UID/sessions/SESSION_ID
+(where UID is the learner uid and SESSION_ID is a new UUID)
 
 Required fields:
 - lesson_id (string): ID of the lesson completed
@@ -71,8 +72,8 @@ Required fields:
 - created_at (string): ISO 8601 UTC timestamp of session completion
 
 ## Step 3 — Write concept mastery records
-For each concept reviewed, write a Firestore document at:
-learners/{uid}/concepts/{concept_id}
+For each concept reviewed, write a Firestore document at path: learners/UID/concepts/CONCEPT_ID
+(where UID is the learner uid and CONCEPT_ID is the concept identifier)
 
 Required fields:
 - mastery_score (float): updated mastery from run_fsrs output
