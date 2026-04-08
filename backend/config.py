@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import Any, Tuple, Type
 
+from pydantic import field_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -23,6 +24,17 @@ class Settings(BaseSettings):
     # GCP
     gcp_project_id: str = "agentic-learning-app-e13cb"
     gcp_location: str = "us-central1"
+
+    @field_validator("gcp_project_id", mode="before")
+    @classmethod
+    def _default_project_id(cls, v: str) -> str:
+        # Devcontainer sets GCP_PROJECT_ID="" in env; fall back to hardcoded default.
+        return v or "agentic-learning-app-e13cb"
+
+    @field_validator("gcp_location", mode="before")
+    @classmethod
+    def _default_location(cls, v: str) -> str:
+        return v or "us-central1"
 
     # Cloud SQL
     db_host: str = "127.0.0.1"
