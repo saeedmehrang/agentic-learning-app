@@ -1,0 +1,119 @@
+{
+  "displayName": "Agentic Learning — Backend Latency",
+  "mosaicLayout": {
+    "columns": 12,
+    "tiles": [
+      {
+        "height": 4,
+        "width": 12,
+        "widget": {
+          "title": "Agent Turn Latency by Version (p50 / p95)",
+          "xyChart": {
+            "dataSets": [
+              {
+                "timeSeriesQuery": {
+                  "timeSeriesFilterRatio": {
+                    "numerator": {
+                      "filter": "metric.type=\"logging.googleapis.com/user/agent_turn_latency_p50\" resource.type=\"cloud_run_revision\"",
+                      "aggregation": {
+                        "alignmentPeriod": "60s",
+                        "perSeriesAligner": "ALIGN_MEAN",
+                        "groupByFields": ["metric.label.agent", "metric.label.app_version"]
+                      }
+                    }
+                  }
+                },
+                "plotType": "LINE",
+                "legendTemplate": "${metric.label.agent} @ ${metric.label.app_version} (p50)"
+              },
+              {
+                "timeSeriesQuery": {
+                  "timeSeriesFilterRatio": {
+                    "numerator": {
+                      "filter": "metric.type=\"logging.googleapis.com/user/agent_turn_latency_p95\" resource.type=\"cloud_run_revision\"",
+                      "aggregation": {
+                        "alignmentPeriod": "60s",
+                        "perSeriesAligner": "ALIGN_MEAN",
+                        "groupByFields": ["metric.label.agent", "metric.label.app_version"]
+                      }
+                    }
+                  }
+                },
+                "plotType": "LINE",
+                "legendTemplate": "${metric.label.agent} @ ${metric.label.app_version} (p95)"
+              }
+            ],
+            "yAxis": {
+              "label": "Latency (ms)",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "height": 4,
+        "width": 6,
+        "yPos": 4,
+        "widget": {
+          "title": "Agent Turn Count by Agent & Version",
+          "xyChart": {
+            "dataSets": [
+              {
+                "timeSeriesQuery": {
+                  "timeSeriesFilterRatio": {
+                    "numerator": {
+                      "filter": "metric.type=\"logging.googleapis.com/user/agent_turn_count\" resource.type=\"cloud_run_revision\"",
+                      "aggregation": {
+                        "alignmentPeriod": "60s",
+                        "perSeriesAligner": "ALIGN_RATE",
+                        "groupByFields": ["metric.label.agent", "metric.label.app_version"]
+                      }
+                    }
+                  }
+                },
+                "plotType": "STACKED_BAR",
+                "legendTemplate": "${metric.label.agent} @ ${metric.label.app_version}"
+              }
+            ],
+            "yAxis": {
+              "label": "Turns / minute",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "height": 4,
+        "width": 6,
+        "yPos": 4,
+        "xPos": 6,
+        "widget": {
+          "title": "Backend Error Rate (5xx)",
+          "xyChart": {
+            "dataSets": [
+              {
+                "timeSeriesQuery": {
+                  "timeSeriesFilterRatio": {
+                    "numerator": {
+                      "filter": "resource.type=\"cloud_run_revision\" metric.type=\"run.googleapis.com/request_count\" metric.label.response_code_class=\"5xx\"",
+                      "aggregation": {
+                        "alignmentPeriod": "60s",
+                        "perSeriesAligner": "ALIGN_RATE"
+                      }
+                    }
+                  }
+                },
+                "plotType": "LINE",
+                "legendTemplate": "5xx errors / s"
+              }
+            ],
+            "yAxis": {
+              "label": "Errors / second",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

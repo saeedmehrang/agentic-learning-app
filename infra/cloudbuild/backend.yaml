@@ -3,6 +3,15 @@
 # Trigger this manually with:
 #   gcloud builds submit --config infra/cloudbuild/backend.yaml .
 # Or wire to a Cloud Build trigger on push to main.
+#
+# After building, deploy with version tagging (squash-merge convention):
+#   APP_VERSION=$(git rev-parse --short HEAD)
+#   gcloud run deploy backend \
+#     --image us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/backend:$APP_VERSION \
+#     --set-env-vars APP_VERSION=$APP_VERSION \
+#     --region us-central1
+# APP_VERSION tags all Cloud Trace spans and Cloud Monitoring metrics from this revision,
+# enabling before/after latency comparison per squash-merge in the monitoring dashboard.
 
 steps:
   - name: "gcr.io/cloud-builders/docker"
