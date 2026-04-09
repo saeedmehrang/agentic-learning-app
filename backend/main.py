@@ -9,8 +9,12 @@ Session lifecycle (per-turn interactive API)
 4. POST  /session/{id}/help      → HelpAgent (max 3 turns, hard-capped). Returns help response.
 5. POST  /session/{id}/complete  → SummaryAgent. Writes Firestore. Returns summary JSON.
 
-Each agent runs in its own Runner, but all share the same InMemorySessionService so ADK
-session state (output_key values) persists across HTTP calls within a session.
+Session service isolation:
+- ContextAgent: own service (_context_session_service) — single-turn, no history needed.
+- LessonAgent + HelpAgent: shared service (_lesson_session_service) — HelpAgent needs
+  lesson context to answer follow-up questions.
+- SummaryAgent: own service (_summary_session_service) — single-turn, sending the full
+  lesson history would exhaust token quotas and is unnecessary.
 
 HelpAgent hard cap
 ------------------
@@ -54,27 +58,29 @@ logger = logging.getLogger(__name__)
 # values written by one agent are visible to the next agent in the same session.
 # ---------------------------------------------------------------------------
 
-_session_service = InMemorySessionService()
+_context_session_service = InMemorySessionService()
+_lesson_session_service = InMemorySessionService()   # shared by lesson + help
+_summary_session_service = InMemorySessionService()
 
 _context_runner = Runner(
     agent=context_agent,
     app_name="agentic_learning_app",
-    session_service=_session_service,
+    session_service=_context_session_service,
 )
 _lesson_runner = Runner(
     agent=lesson_agent,
     app_name="agentic_learning_app",
-    session_service=_session_service,
+    session_service=_lesson_session_service,
 )
 _help_runner = Runner(
     agent=help_agent,
     app_name="agentic_learning_app",
-    session_service=_session_service,
+    session_service=_lesson_session_service,
 )
 _summary_runner = Runner(
     agent=summary_agent,
     app_name="agentic_learning_app",
-    session_service=_session_service,
+    session_service=_summary_session_service,
 )
 
 
@@ -88,7 +94,8 @@ _summary_runner = Runner(
 class SessionData:
     session_id: str
     uid: str
-    adk_session_id: str          # ADK InMemorySession id (may differ from session_id)
+    adk_session_id: str          # lesson+help session (shared between those two agents)
+    summary_adk_session_id: str  # isolated session for SummaryAgent
     context_output: dict[str, Any] = field(default_factory=dict)
     lesson_output: dict[str, Any] = field(default_factory=dict)
     quiz_questions_asked: int = 0
@@ -255,21 +262,32 @@ async def session_start(request: SessionStartRequest) -> SessionStartResponse:
     """
     session_id = str(uuid.uuid4())
     try:
-        adk_session = await _session_service.create_session(
+        # ContextAgent gets its own isolated session (single-turn, no history needed)
+        ctx_adk_session = await _context_session_service.create_session(
             app_name="agentic_learning_app",
             user_id=request.uid,
         )
-        adk_session_id: str = adk_session.id
+        # Lesson+Help share a session so HelpAgent can see lesson history
+        lesson_adk_session = await _lesson_session_service.create_session(
+            app_name="agentic_learning_app",
+            user_id=request.uid,
+        )
+        # SummaryAgent gets its own isolated session (single-turn, avoids token bloat)
+        summary_adk_session = await _summary_session_service.create_session(
+            app_name="agentic_learning_app",
+            user_id=request.uid,
+        )
 
         raw = await _run_agent_turn(
-            _context_runner, request.uid, adk_session_id, request.uid
+            _context_runner, request.uid, ctx_adk_session.id, request.uid
         )
         context_output = _parse_json_response(raw, session_id, "context_agent")
 
         _sessions[session_id] = SessionData(
             session_id=session_id,
             uid=request.uid,
-            adk_session_id=adk_session_id,
+            adk_session_id=lesson_adk_session.id,
+            summary_adk_session_id=summary_adk_session.id,
             context_output=context_output,
             phase="lesson",
         )
@@ -525,7 +543,7 @@ async def complete_session(session_id: str) -> SessionCompleteResponse:
     )
 
     try:
-        raw = await _run_agent_turn(_summary_runner, data.uid, data.adk_session_id, prompt)
+        raw = await _run_agent_turn(_summary_runner, data.uid, data.summary_adk_session_id, prompt)
         parsed = _parse_json_response(raw, session_id, "summary_agent")
 
         data.phase = "complete"
