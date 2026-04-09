@@ -101,9 +101,24 @@ To point the interface at a remote or different backend:
 BACKEND_URL=http://your-ip:8080 uv run streamlit run app.py
 ```
 
+-----
+
+## Observability
+
+Each session you run through dev_chat produces live traces in Cloud Trace. After clicking **Start Session**, open:
+
+[Cloud Trace → Latest traces](https://console.cloud.google.com/traces/list?project=agentic-learning-app-e13cb)
+
+Expand any trace to see the waterfall:
+- `agent_turn.context_agent` — total time for ContextAgent (includes RAG search)
+- `agent_turn.lesson_agent` — lesson delivery or quiz evaluation
+- `call_llm` (child of each agent turn) — raw Gemini API latency
+- `execute_tool` (child of agent turns that call tools) — e.g. `search_knowledge_base`
+
+Structured `agent_turn_complete` logs with `latency_ms` are also visible in Cloud Logging:
+
+```
+jsonPayload.message="agent_turn_complete"
 ```
 
-### Quick Checks for your `app.py`:
-1.  **Backend Health Check:** Your health check in `render_sidebar` uses `requests.get(f"{BACKEND_URL}/health")`. Ensure your FastAPI backend actually has a `@app.get("/health")` endpoint, or that will stay red.
-2.  **Help Agent Response:** Your `_format_help_response` function currently returns a hardcoded string. Since your HelpAgent likely returns a `response_text` or similar field in the JSON, make sure to update that function to pull the actual string so you can see the agent's explanation!
-```
+Local runs appear as `app_version=dev` in all signals.
