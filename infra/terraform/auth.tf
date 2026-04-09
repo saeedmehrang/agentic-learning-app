@@ -13,11 +13,14 @@
 #      - Add authorised redirect URI:
 #          https://agentic-learning-app-e13cb.firebaseapp.com/__/auth/handler
 #      - Copy the Client ID and Client Secret.
-#   3. Run apply passing the credentials:
-#        terraform apply \
-#          -var="google_oauth_client_id=YOUR_CLIENT_ID" \
-#          -var="google_oauth_client_secret=YOUR_CLIENT_SECRET"
-#      The secret is stored in Secret Manager — you only need to pass it once.
+#   3. First apply — pass the secret via inline prompt (never stored on disk,
+#      never appears in shell history):
+#        terraform apply -var="google_oauth_client_secret=$(read -rs s && echo $s)"
+#
+#   All subsequent applies — read from Secret Manager:
+#        export TF_VAR_google_oauth_client_secret=$(gcloud secrets versions access latest \
+#          --secret=GOOGLE_OAUTH_CLIENT_SECRET)
+#        terraform apply
 # ---------------------------------------------------------------------------
 
 # Enable Identity Platform API
@@ -41,6 +44,13 @@ resource "google_identity_platform_config" "auth" {
     }
     # Prevent duplicate accounts when anonymous users upgrade to Google Sign-In
     allow_duplicate_emails = false
+  }
+
+  # The Identity Platform API re-adds multi_tenant, email, and phone_number
+  # blocks with default values after every apply. Ignore them to prevent
+  # perpetual drift.
+  lifecycle {
+    ignore_changes = [multi_tenant, sign_in[0].email, sign_in[0].phone_number]
   }
 
   depends_on = [google_project_service.identity_platform_api]
