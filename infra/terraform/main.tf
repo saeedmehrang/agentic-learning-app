@@ -87,6 +87,24 @@ resource "google_project_iam_member" "firestore_user" {
   member  = "serviceAccount:${google_service_account.cloud_run_sa.email}"
 }
 
+resource "google_project_iam_member" "cloudtrace_agent" {
+  project = var.project_id
+  role    = "roles/cloudtrace.agent"
+  member  = "serviceAccount:${google_service_account.cloud_run_sa.email}"
+}
+
+resource "google_project_iam_member" "log_writer" {
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.cloud_run_sa.email}"
+}
+
+resource "google_project_iam_member" "metric_writer" {
+  project = var.project_id
+  role    = "roles/monitoring.metricWriter"
+  member  = "serviceAccount:${google_service_account.cloud_run_sa.email}"
+}
+
 # Grant the SA read access to each secret
 resource "google_secret_manager_secret_iam_member" "sa_db_password" {
   secret_id = google_secret_manager_secret.db_password.id
