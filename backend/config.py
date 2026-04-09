@@ -46,6 +46,9 @@ class Settings(BaseSettings):
 
     # App environment
     app_env: str = "development"
+    # Deployment version — set to $COMMIT_SHA at deploy time (gcloud run deploy --set-env-vars).
+    # Defaults to "dev" for local runs. Used to group metrics by deployment in Cloud Monitoring.
+    app_version: str = "dev"
 
     # Model assignments (fixed per CLAUDE.md — do not change)
     context_agent_model: str = "gemini-2.5-flash-lite"
