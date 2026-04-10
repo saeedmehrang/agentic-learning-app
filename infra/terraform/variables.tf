@@ -37,9 +37,4 @@ variable "google_oauth_client_id" {
   type        = string
 }
 
-variable "google_oauth_client_secret" {
-  description = "Google OAuth 2.0 client secret for Firebase Google Sign-In"
-  type        = string
-  sensitive   = true
-}
 

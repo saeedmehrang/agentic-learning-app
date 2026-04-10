@@ -61,6 +61,9 @@ assets/characters/**/*.sketch
 *.swp
 *.swo
 
+# Local notes (untracked)
+notes/
+
 # Terraform
 infra/**/.terraform/
 infra/**/*.tfstate

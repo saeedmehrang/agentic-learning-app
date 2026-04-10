@@ -4,7 +4,7 @@
 # Upgrades the project to Identity Platform (free up to 50k MAU).
 # Enables Anonymous sign-in and Google Sign-In.
 #
-# Prerequisites (one-time manual steps):
+# Prerequisites (one-time manual steps — never passed via terraform var):
 #   1. GCP Console > APIs & Services > OAuth Consent Screen
 #      - Audience: External
 #      - App name, support email — save.
@@ -13,14 +13,15 @@
 #      - Add authorised redirect URI:
 #          https://agentic-learning-app-e13cb.firebaseapp.com/__/auth/handler
 #      - Copy the Client ID and Client Secret.
-#   3. First apply — pass the secret via inline prompt (never stored on disk,
-#      never appears in shell history):
-#        terraform apply -var="google_oauth_client_secret=$(read -rs s && echo $s)"
-#
-#   All subsequent applies — read from Secret Manager:
-#        export TF_VAR_google_oauth_client_secret=$(gcloud secrets versions access latest \
-#          --secret=GOOGLE_OAUTH_CLIENT_SECRET)
-#        terraform apply
+#   3. Store the secret manually in Secret Manager (one-time, never touches tfstate):
+#        gcloud secrets create GOOGLE_OAUTH_CLIENT_SECRET \
+#          --project=agentic-learning-app-e13cb \
+#          --replication-policy=automatic
+#        gcloud secrets versions add GOOGLE_OAUTH_CLIENT_SECRET \
+#          --project=agentic-learning-app-e13cb \
+#          --data-file=<(echo -n "YOUR_CLIENT_SECRET")
+#   4. Run terraform apply normally — the secret is read from Secret Manager at
+#      apply time via a data source and is never written into tfstate.
 # ---------------------------------------------------------------------------
 
 # Enable Identity Platform API
@@ -64,13 +65,15 @@ resource "google_identity_platform_default_supported_idp_config" "google_sign_in
   idp_id   = "google.com"
 
   client_id     = var.google_oauth_client_id
-  client_secret = var.google_oauth_client_secret
+  client_secret = data.google_secret_manager_secret_version.google_oauth_client_secret.secret_data
 
   depends_on = [google_identity_platform_config.auth]
 }
 
 # ---------------------------------------------------------------------------
-# Store the OAuth client secret in Secret Manager (never hardcoded in .tf)
+# OAuth client secret — managed manually in Secret Manager, never via Terraform.
+# Terraform only holds the shell resource so IAM can reference it.
+# The secret value is never written into tfstate.
 # ---------------------------------------------------------------------------
 resource "google_secret_manager_secret" "google_oauth_client_secret" {
   secret_id = "GOOGLE_OAUTH_CLIENT_SECRET"
@@ -78,11 +81,18 @@ resource "google_secret_manager_secret" "google_oauth_client_secret" {
   replication {
     auto {}
   }
+
+  # Terraform owns the secret shell but never the value.
+  # Prevent accidental destroy/recreate from rotating the secret.
+  lifecycle {
+    ignore_changes = [replication]
+  }
 }
 
-resource "google_secret_manager_secret_version" "google_oauth_client_secret_value" {
-  secret      = google_secret_manager_secret.google_oauth_client_secret.id
-  secret_data = var.google_oauth_client_secret
+# Read the secret value at apply time — never stored in tfstate.
+data "google_secret_manager_secret_version" "google_oauth_client_secret" {
+  secret  = google_secret_manager_secret.google_oauth_client_secret.id
+  project = var.project_id
 }
 
 resource "google_secret_manager_secret_iam_member" "sa_google_oauth_client_secret" {
