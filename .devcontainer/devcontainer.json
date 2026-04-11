@@ -17,7 +17,11 @@
     // Fixed: Removed 'readonly' so gcloud can update credentials/tokens
     "source=${localEnv:HOME}/.config/gcloud,target=/home/vscode/.config/gcloud,type=bind",
     // Added: Persist Claude Code authentication and settings
-    "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind"
+    "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind",
+    // Added: Mirror host SSH config (port overrides, ProxyJump, etc.) read-only — keys stay on host via agent forwarding
+    "source=${localEnv:HOME}/.ssh/config,target=/home/vscode/.ssh/config,type=bind,readonly",
+    // Added: Mirror host known_hosts so SSH host key verification passes without prompts (read-only; new entries won't persist, which is fine for dev containers)
+    "source=${localEnv:HOME}/.ssh/known_hosts,target=/home/vscode/.ssh/known_hosts,type=bind,readonly"
   ],
   "containerEnv": {
     "GOOGLE_CLOUD_PROJECT": "${localEnv:GOOGLE_CLOUD_PROJECT}",
