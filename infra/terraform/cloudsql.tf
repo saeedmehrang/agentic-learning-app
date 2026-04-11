@@ -62,6 +62,9 @@ resource "google_sql_database_instance" "learning_app" {
     ip_configuration {
       ipv4_enabled    = true  # Public IP required for Cloud SQL Auth Proxy from devcontainer/CI (no VPC routing). Cost: $0 extra. IAM enforces access.
       private_network = "projects/${var.project_id}/global/networks/default"
+      ssl_mode        = "TRUSTED_CLIENT_CERTIFICATE_REQUIRED" # Require SSL for all connections; rejects plaintext
+      # No authorized_networks entries — direct TCP from the internet is blocked.
+      # All access goes through Cloud SQL Auth Proxy (IAM-authenticated).
     }
 
     backup_configuration {

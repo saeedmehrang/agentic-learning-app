@@ -168,6 +168,46 @@ Firebase Console → your project → Analytics → Enable
 
 ---
 
+---
+
+## Observability
+
+The backend emits OpenTelemetry spans to **Cloud Trace** and structured latency logs to **Cloud Logging**. Both work from local `uvicorn` runs and from Cloud Run.
+
+### What is instrumented
+
+| Signal | Where to view |
+|---|---|
+| Per-request waterfall (HTTP + all agent turns) | [Cloud Trace](https://console.cloud.google.com/traces/list?project=agentic-learning-app-e13cb) |
+| Per-agent latency (`call_llm`, `execute_tool` sub-spans emitted by ADK) | Cloud Trace → expand any `agent_turn.*` span |
+| `agent_turn_complete` structured log (latency_ms, agent, app_version) | [Cloud Logging](https://console.cloud.google.com/logs?project=agentic-learning-app-e13cb) → filter `jsonPayload.message="agent_turn_complete"` |
+| Latency trends + before/after deployment comparison | Cloud Monitoring dashboard (see setup below) |
+
+### One-time monitoring setup
+
+Creates the log-based metrics and imports the latency dashboard into Cloud Monitoring:
+
+```bash
+bash infra/monitoring/setup_metrics.sh
+```
+
+Requires `roles/monitoring.admin` or project owner. Run once per GCP project.
+
+### Deployment version tagging (before/after comparison)
+
+Each Cloud Run deploy is tagged with the merge commit SHA so latency charts show a separate series per deployment:
+
+```bash
+APP_VERSION=$(git rev-parse --short HEAD)
+gcloud run deploy backend \
+  --set-env-vars APP_VERSION=$APP_VERSION \
+  [... usual flags ...]
+```
+
+Convention: **squash-merge feature branches to `main`, then deploy immediately.** This makes each series in the Cloud Monitoring dashboard correspond to exactly one PR. Local runs always appear as `app_version=dev` and never pollute deployed metrics.
+
+---
+
 ## Phase Status
 
 See [development_roadmap.md](development_roadmap.md) for the full checklist. Phase 0.1–0.3 complete.

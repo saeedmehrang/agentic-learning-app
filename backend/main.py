@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time as _time
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -35,6 +36,14 @@ from fastapi import FastAPI, HTTPException
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types as genai_types
+from opentelemetry import trace as otel_trace
+from opentelemetry.exporter.gcp_trace import CloudTraceSpanExporter
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.propagate import set_global_textmap
+from opentelemetry.propagators.cloud_trace_propagator import CloudTraceFormatPropagator
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from pydantic import BaseModel
 
 from agents.context_agent import context_agent
@@ -52,6 +61,26 @@ os.environ.setdefault("GOOGLE_CLOUD_LOCATION", settings.gcp_location)
 
 configure_logging()
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# OpenTelemetry — Cloud Trace
+# Spans are exported to Cloud Trace (free within GCP quotas).
+# ADK emits child spans automatically: call_llm, execute_tool, invoke_agent.
+# APP_VERSION is injected at deploy time via --set-env-vars APP_VERSION=$COMMIT_SHA
+# so each Cloud Run revision (= squash-merge to main) is a separate series in
+# Cloud Monitoring dashboards for before/after latency comparison.
+# ---------------------------------------------------------------------------
+
+_otel_resource = Resource(attributes={
+    "service.name": "agentic-learning-backend",
+    "service.version": settings.app_version,
+})
+_tracer_provider = TracerProvider(resource=_otel_resource)
+_tracer_provider.add_span_processor(BatchSpanProcessor(CloudTraceSpanExporter()))
+otel_trace.set_tracer_provider(_tracer_provider)
+set_global_textmap(CloudTraceFormatPropagator())
+
+_tracer = otel_trace.get_tracer("agentic_learning")
 
 # ---------------------------------------------------------------------------
 # ADK session service — shared across all per-agent runners so that output_key
@@ -121,6 +150,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(title="Agentic Learning Backend", lifespan=lifespan)
+FastAPIInstrumentor.instrument_app(app)
 
 
 @app.get("/health")
@@ -195,23 +225,41 @@ async def _run_agent_turn(
     uid: str,
     adk_session_id: str,
     message: str,
+    *,
+    agent_name: str = "unknown",
 ) -> str:
     """Run one agent turn and return the final response text."""
-    new_message = genai_types.Content(
-        role="user",
-        parts=[genai_types.Part(text=message)],
-    )
-    final_text = ""
-    async for event in runner.run_async(
-        user_id=uid,
-        session_id=adk_session_id,
-        new_message=new_message,
-    ):
-        if event.is_final_response():
-            parts = getattr(event.content, "parts", []) or []
-            if parts:
-                final_text = getattr(parts[0], "text", "") or ""
-    return final_text
+    with _tracer.start_as_current_span(f"agent_turn.{agent_name}") as span:
+        span.set_attribute("agent", agent_name)
+        span.set_attribute("app_version", settings.app_version)
+        t0 = _time.monotonic()
+
+        new_message = genai_types.Content(
+            role="user",
+            parts=[genai_types.Part(text=message)],
+        )
+        final_text = ""
+        async for event in runner.run_async(
+            user_id=uid,
+            session_id=adk_session_id,
+            new_message=new_message,
+        ):
+            if event.is_final_response():
+                parts = getattr(event.content, "parts", []) or []
+                if parts:
+                    final_text = getattr(parts[0], "text", "") or ""
+
+        latency_ms = int((_time.monotonic() - t0) * 1000)
+        span.set_attribute("latency_ms", latency_ms)
+        logger.info(
+            "agent_turn_complete",
+            extra={
+                "agent": agent_name,
+                "latency_ms": latency_ms,
+                "app_version": settings.app_version,
+            },
+        )
+        return final_text
 
 
 def _parse_json_response(raw: str, session_id: str, context: str) -> dict[str, Any]:
@@ -279,7 +327,8 @@ async def session_start(request: SessionStartRequest) -> SessionStartResponse:
         )
 
         raw = await _run_agent_turn(
-            _context_runner, request.uid, ctx_adk_session.id, request.uid
+            _context_runner, request.uid, ctx_adk_session.id, request.uid,
+            agent_name="context_agent",
         )
         context_output = _parse_json_response(raw, session_id, "context_agent")
 
@@ -342,7 +391,10 @@ async def get_lesson(session_id: str) -> LessonResponse:
     )
 
     try:
-        raw = await _run_agent_turn(_lesson_runner, data.uid, data.adk_session_id, prompt)
+        raw = await _run_agent_turn(
+            _lesson_runner, data.uid, data.adk_session_id, prompt,
+            agent_name="lesson_agent",
+        )
         parsed = _parse_json_response(raw, session_id, "lesson_agent_teaching")
         data.lesson_output = parsed
         data.phase = "quiz"
@@ -382,7 +434,8 @@ async def get_quiz_question(session_id: str) -> QuizQuestionResponse:
 
     try:
         raw = await _run_agent_turn(
-            _lesson_runner, data.uid, data.adk_session_id, "next question"
+            _lesson_runner, data.uid, data.adk_session_id, "next question",
+            agent_name="lesson_agent",
         )
         parsed = _parse_json_response(raw, session_id, "lesson_agent_quiz_question")
         data.quiz_questions_asked += 1
@@ -423,7 +476,8 @@ async def submit_quiz_answer(session_id: str, request: QuizAnswerRequest) -> Qui
 
     try:
         raw = await _run_agent_turn(
-            _lesson_runner, data.uid, data.adk_session_id, request.answer
+            _lesson_runner, data.uid, data.adk_session_id, request.answer,
+            agent_name="lesson_agent",
         )
         parsed = _parse_json_response(raw, session_id, "lesson_agent_answer_eval")
 
@@ -476,7 +530,10 @@ async def help_turn(session_id: str, request: HelpRequest) -> HelpResponse:
 
     try:
         hr.increment_turn()
-        raw = await _run_agent_turn(_help_runner, data.uid, data.adk_session_id, request.message)
+        raw = await _run_agent_turn(
+            _help_runner, data.uid, data.adk_session_id, request.message,
+            agent_name="help_agent",
+        )
         parsed = _parse_json_response(raw, session_id, "help_agent")
 
         resolved = bool(parsed.get("resolved", False))
@@ -543,7 +600,10 @@ async def complete_session(session_id: str) -> SessionCompleteResponse:
     )
 
     try:
-        raw = await _run_agent_turn(_summary_runner, data.uid, data.summary_adk_session_id, prompt)
+        raw = await _run_agent_turn(
+            _summary_runner, data.uid, data.summary_adk_session_id, prompt,
+            agent_name="summary_agent",
+        )
         parsed = _parse_json_response(raw, session_id, "summary_agent")
 
         data.phase = "complete"

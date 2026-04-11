@@ -4,7 +4,7 @@
 # Upgrades the project to Identity Platform (free up to 50k MAU).
 # Enables Anonymous sign-in and Google Sign-In.
 #
-# Prerequisites (one-time manual steps):
+# Prerequisites (one-time manual steps — never passed via terraform var):
 #   1. GCP Console > APIs & Services > OAuth Consent Screen
 #      - Audience: External
 #      - App name, support email — save.
@@ -13,11 +13,15 @@
 #      - Add authorised redirect URI:
 #          https://agentic-learning-app-e13cb.firebaseapp.com/__/auth/handler
 #      - Copy the Client ID and Client Secret.
-#   3. Run apply passing the credentials:
-#        terraform apply \
-#          -var="google_oauth_client_id=YOUR_CLIENT_ID" \
-#          -var="google_oauth_client_secret=YOUR_CLIENT_SECRET"
-#      The secret is stored in Secret Manager — you only need to pass it once.
+#   3. Store the secret manually in Secret Manager (one-time, never touches tfstate):
+#        gcloud secrets create GOOGLE_OAUTH_CLIENT_SECRET \
+#          --project=agentic-learning-app-e13cb \
+#          --replication-policy=automatic
+#        gcloud secrets versions add GOOGLE_OAUTH_CLIENT_SECRET \
+#          --project=agentic-learning-app-e13cb \
+#          --data-file=<(echo -n "YOUR_CLIENT_SECRET")
+#   4. Run terraform apply normally — the secret is read from Secret Manager at
+#      apply time via a data source and is never written into tfstate.
 # ---------------------------------------------------------------------------
 
 # Enable Identity Platform API
@@ -43,24 +47,36 @@ resource "google_identity_platform_config" "auth" {
     allow_duplicate_emails = false
   }
 
+  # The Identity Platform API re-adds multi_tenant, email, and phone_number
+  # blocks with default values after every apply. Ignore them to prevent
+  # perpetual drift.
+  lifecycle {
+    ignore_changes = [multi_tenant, sign_in[0].email, sign_in[0].phone_number]
+  }
+
   depends_on = [google_project_service.identity_platform_api]
 }
 
-# Enable Google Sign-In
-resource "google_identity_platform_default_supported_idp_config" "google_sign_in" {
-  provider = google-beta
-  project  = var.project_id
-  enabled  = true
-  idp_id   = "google.com"
-
-  client_id     = var.google_oauth_client_id
-  client_secret = var.google_oauth_client_secret
-
-  depends_on = [google_identity_platform_config.auth]
-}
+# TODO Phase 5: Uncomment when Flutter app is ready for Google Sign-In.
+# Requires: recreate OAuth client, store secret via gcloud secrets versions add,
+# update google_oauth_client_id in terraform.tfvars, then terraform apply.
+#
+# resource "google_identity_platform_default_supported_idp_config" "google_sign_in" {
+#   provider = google-beta
+#   project  = var.project_id
+#   enabled  = true
+#   idp_id   = "google.com"
+#
+#   client_id     = var.google_oauth_client_id
+#   client_secret = data.google_secret_manager_secret_version.google_oauth_client_secret.secret_data
+#
+#   depends_on = [google_identity_platform_config.auth]
+# }
 
 # ---------------------------------------------------------------------------
-# Store the OAuth client secret in Secret Manager (never hardcoded in .tf)
+# OAuth client secret — managed manually in Secret Manager, never via Terraform.
+# Terraform only holds the shell resource so IAM can reference it.
+# The secret value is never written into tfstate.
 # ---------------------------------------------------------------------------
 resource "google_secret_manager_secret" "google_oauth_client_secret" {
   secret_id = "GOOGLE_OAUTH_CLIENT_SECRET"
@@ -68,12 +84,19 @@ resource "google_secret_manager_secret" "google_oauth_client_secret" {
   replication {
     auto {}
   }
+
+  # Terraform owns the secret shell but never the value.
+  # Prevent accidental destroy/recreate from rotating the secret.
+  lifecycle {
+    ignore_changes = [replication]
+  }
 }
 
-resource "google_secret_manager_secret_version" "google_oauth_client_secret_value" {
-  secret      = google_secret_manager_secret.google_oauth_client_secret.id
-  secret_data = var.google_oauth_client_secret
-}
+# TODO Phase 5: Uncomment alongside google_sign_in resource above.
+# data "google_secret_manager_secret_version" "google_oauth_client_secret" {
+#   secret  = google_secret_manager_secret.google_oauth_client_secret.id
+#   project = var.project_id
+# }
 
 resource "google_secret_manager_secret_iam_member" "sa_google_oauth_client_secret" {
   secret_id = google_secret_manager_secret.google_oauth_client_secret.id
