@@ -57,18 +57,21 @@ resource "google_identity_platform_config" "auth" {
   depends_on = [google_project_service.identity_platform_api]
 }
 
-# Enable Google Sign-In
-resource "google_identity_platform_default_supported_idp_config" "google_sign_in" {
-  provider = google-beta
-  project  = var.project_id
-  enabled  = true
-  idp_id   = "google.com"
-
-  client_id     = var.google_oauth_client_id
-  client_secret = data.google_secret_manager_secret_version.google_oauth_client_secret.secret_data
-
-  depends_on = [google_identity_platform_config.auth]
-}
+# TODO Phase 5: Uncomment when Flutter app is ready for Google Sign-In.
+# Requires: recreate OAuth client, store secret via gcloud secrets versions add,
+# update google_oauth_client_id in terraform.tfvars, then terraform apply.
+#
+# resource "google_identity_platform_default_supported_idp_config" "google_sign_in" {
+#   provider = google-beta
+#   project  = var.project_id
+#   enabled  = true
+#   idp_id   = "google.com"
+#
+#   client_id     = var.google_oauth_client_id
+#   client_secret = data.google_secret_manager_secret_version.google_oauth_client_secret.secret_data
+#
+#   depends_on = [google_identity_platform_config.auth]
+# }
 
 # ---------------------------------------------------------------------------
 # OAuth client secret — managed manually in Secret Manager, never via Terraform.
@@ -89,11 +92,11 @@ resource "google_secret_manager_secret" "google_oauth_client_secret" {
   }
 }
 
-# Read the secret value at apply time — never stored in tfstate.
-data "google_secret_manager_secret_version" "google_oauth_client_secret" {
-  secret  = google_secret_manager_secret.google_oauth_client_secret.id
-  project = var.project_id
-}
+# TODO Phase 5: Uncomment alongside google_sign_in resource above.
+# data "google_secret_manager_secret_version" "google_oauth_client_secret" {
+#   secret  = google_secret_manager_secret.google_oauth_client_secret.id
+#   project = var.project_id
+# }
 
 resource "google_secret_manager_secret_iam_member" "sa_google_oauth_client_secret" {
   secret_id = google_secret_manager_secret.google_oauth_client_secret.id
