@@ -68,6 +68,7 @@ notes/
 infra/**/.terraform/
 infra/**/*.tfstate
 infra/**/*.tfstate.backup
+infra/**/*.tfstate.*.backup
 infra/**/*.tfvars
 infra/**/*.plan
 infra/**/*tfplan
