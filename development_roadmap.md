@@ -10,7 +10,7 @@
 | Phase 0 | GCP & Firebase Setup | ☐ |
 | Phase 1 | Content Generation | ☐ |
 | Phase 2 | Character Asset Production | ☐ |
-| Phase 3 | Backend Simplification Refactor | ☐ |
+| Phase 3 | Backend Simplification Refactor | 🔄 PR-1 ✅ |
 | Phase 4 | Integration & Load Testing | ☐ |
 | Phase 5 | Flutter App | ☐ |
 | Phase 6 | Trial Launch & Iteration | ☐ |
@@ -134,57 +134,23 @@ See `notes/simplification-plan-remove-rag-adk.md` for full design rationale.
 
 ---
 
-### PR-1: Decommission Dead Code & Infra
+### PR-1: Decommission Dead Code & Infra ✅ merged
 
-**Goal:** Remove all ADK, pgvector, Cloud SQL, and Vertex AI embedding references from the codebase and infrastructure. No new code added.
+**What was done:**
+- Deleted all 4 ADK agents, `pipeline.py`, `search_knowledge_base.py`, `get_course_structure.py`, all embed/seed/validate scripts, agent tests, integration pipeline test
+- Removed `google-adk`, `psycopg2-binary`, `google-cloud-aiplatform` from dependencies
+- Cleaned `config.py`, `.env.example`, `push_secrets.sh`, `main.tf`, `enable_apis.sh`, `teardown.sh`
+- Archived SQL migrations to `infra/sql/archive/`; deleted `cloudsql.tf`
+- Fixed OTel import bug: `opentelemetry.exporter.gcp_trace` → `opentelemetry.exporter.cloud_trace`
+- Added 77 tests: full HTTP session lifecycle (47), FSRS edge cases (23), logging config (14)
+- GCP: Cloud SQL instance, VPC peering, DB secrets, IAM bindings destroyed via Terraform
+  - Note: `google_service_networking_connection` and `google_compute_global_address` had to be removed from Terraform state (`terraform state rm`) after Cloud SQL deletion — GCP's service networking API blocks VPC peering deletion until its internal cleanup completes (~hours). Resources are gone from GCP but no longer tracked in state.
 
-**Requirements before opening:** Phase 1 content approved and in `pipeline/approved/` (backend will read from there after PR-2).
-
-**Files deleted:**
-- `backend/agents/context_agent.py`
-- `backend/agents/lesson_agent.py`
-- `backend/agents/help_agent.py`
-- `backend/agents/summary_agent.py`
-- `backend/tools/search_knowledge_base.py`
-- `backend/tools/get_course_structure.py`
-- `content-generation/embed_content.py`
-- `content-generation/seed_db.py`
-- `content-generation/validate_embeddings.py`
-- `content-generation/validate_db.py`
-- `infra/scripts/enable_pgvector.sh`
-- `infra/scripts/apply_schema.sh`
-- `courses/linux-basics/pipeline/embedded/` (entire directory)
-- `backend/tests/tools/test_search_knowledge_base.py`
-
-**Files modified:**
-- `backend/pyproject.toml` — remove `google-adk`, `psycopg2-binary`
-- `content-generation/pyproject.toml` — remove `google-cloud-aiplatform`; remove `[seed]` extra group (`cloud-sql-python-connector`, `pg8000`); remove deleted scripts from `py-modules`
-- `content-generation/Dockerfile` — change `.[gcs,seed]` → `.[gcs]`; remove deleted scripts from `COPY` list
-- `backend/config.py` — remove `db_host`, `db_port`, `db_name`, `db_user`, `db_password`, `db_connection_name` settings
-- `.env.example` — remove all `DB_*` vars, remove `GOOGLE_GENAI_USE_VERTEXAI`
-- `infra/scripts/push_secrets.sh` — remove `DB_PASSWORD` and `DB_CONNECTION_NAME` push steps
-- `infra/terraform/main.tf` — remove `roles/cloudsql.client` and `roles/aiplatform.user` IAM bindings
-- `infra/sql/` — move `001_create_schema.sql` and `002_add_content_hash.sql` to `infra/sql/archive/`
-
-**GCP decommissioning (done alongside this PR, not in code):**
-```bash
-terraform destroy -target=google_sql_database_instance.learning_app  # Cloud SQL + VPC peering
-gcloud secrets delete DB_PASSWORD --project=$PROJECT_ID
-gcloud secrets delete DB_CONNECTION_NAME --project=$PROJECT_ID
-gcloud services disable sqladmin.googleapis.com --project=$PROJECT_ID
-gcloud services disable aiplatform.googleapis.com --project=$PROJECT_ID
-```
-
-**Definition of Done:**
-```bash
-# No dead references remain
-grep -r "psycopg2\|pgvector\|cloud_sql\|DB_HOST\|DB_PORT\|aiplatform\|google-adk\|search_knowledge_base\|embed_content\|seed_db" backend/ content-generation/ infra/ --include="*.py" --include="*.toml" --include="*.yaml" --include="*.sh"
-# → must return no matches
-
-cd backend && ruff check . && mypy .
-python -m pytest backend/tests/  # run_fsrs tests must pass; agent tests deleted
-terraform plan -chdir=infra/terraform  # must show no Cloud SQL resources
-```
+**Notes for PR-2+:**
+- `main.py` has 5 `# TODO PR-X` stub comments marking where real implementations wire in
+- `ty` (Astral) is the type checker in use — installed in backend `.venv`, not `mypy`
+- Always activate `.venv` before running Python tools: `source backend/.venv/bin/activate`
+- `support_email` in `terraform.tfvars` has no matching variable declaration — harmless warning, fix in a later infra PR
 
 ---
 
