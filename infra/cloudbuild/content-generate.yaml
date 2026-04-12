@@ -1,10 +1,7 @@
 # infra/cloudbuild/content-generate.yaml
 # Cloud Build config: build and push the content generation pipeline image.
 #
-# This image runs generate_content.py by default. The same image can run
-# embed_content.py by overriding the entrypoint on
-# `gcloud run jobs execute`.
-#
+# This image runs generate_content.py by default (outline → lesson → quiz generation).
 # Trigger manually from repo root:
 #   gcloud builds submit --config infra/cloudbuild/content-generate.yaml .
 #

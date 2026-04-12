@@ -22,14 +22,12 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# Install all pipeline dependencies (gcs + seed extras)
+# Install pipeline dependencies (gcs extra required for Cloud Run GCS backend)
 COPY content-generation/pyproject.toml .
-RUN pip install --no-cache-dir ".[gcs,seed]"
+RUN pip install --no-cache-dir ".[gcs]"
 
 # Copy pipeline scripts and shared modules
 COPY content-generation/generate_content.py \
-     content-generation/embed_content.py \
-     content-generation/seed_db.py \
      content-generation/config.py \
      content-generation/review_models.py \
      content-generation/storage.py \

@@ -9,8 +9,6 @@ echo "Enabling required GCP APIs for project: $GCP_PROJECT_ID"
 
 gcloud services enable \
     run.googleapis.com \
-    sqladmin.googleapis.com \
-    aiplatform.googleapis.com \
     generativelanguage.googleapis.com \
     secretmanager.googleapis.com \
     artifactregistry.googleapis.com \
@@ -20,9 +18,9 @@ gcloud services enable \
     firebase.googleapis.com \
     firebasecrashlytics.googleapis.com \
     cloudbuild.googleapis.com \
-    iap.googleapis.com \
-    compute.googleapis.com \
-    servicenetworking.googleapis.com \
+    cloudtrace.googleapis.com \
+    monitoring.googleapis.com \
+    logging.googleapis.com \
     --project="$GCP_PROJECT_ID"
 
 echo "All APIs enabled successfully."

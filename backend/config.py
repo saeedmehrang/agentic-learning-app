@@ -36,25 +36,16 @@ class Settings(BaseSettings):
     def _default_location(cls, v: str) -> str:
         return v or "us-central1"
 
-    # Cloud SQL
-    db_host: str = "127.0.0.1"
-    db_port: int = 5432
-    db_name: str = "learning_app"
-    db_user: str = "app_user"
-    db_password: str = ""
-    db_connection_name: str = ""
-
     # App environment
     app_env: str = "development"
     # Deployment version — set to $COMMIT_SHA at deploy time (gcloud run deploy --set-env-vars).
     # Defaults to "dev" for local runs. Used to group metrics by deployment in Cloud Monitoring.
     app_version: str = "dev"
 
-    # Model assignments (fixed per CLAUDE.md — do not change)
-    context_agent_model: str = "gemini-2.5-flash-lite"
-    lesson_agent_model: str = "gemini-2.5-flash"
-    help_agent_model: str = "gemini-2.5-flash-lite"
-    summary_agent_model: str = "gemini-2.5-flash-lite"
+    # Model assignments (fixed per spec — do not change without updating spec)
+    lesson_model: str = "gemini-2.5-flash"
+    help_model: str = "gemini-2.5-flash-lite"
+    summary_model: str = "gemini-2.5-flash-lite"
 
     @classmethod
     def settings_customise_sources(
