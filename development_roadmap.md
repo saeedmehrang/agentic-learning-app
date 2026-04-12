@@ -280,7 +280,11 @@ python -m pytest backend/tests/test_summary_call.py backend/tests/tools/test_run
 **Definition of Done:**
 ```bash
 cd backend && ruff check . && mypy .
-python -m pytest backend/tests/ -v  # full test suite passes
+python -m pytest backend/tests/ -v  # full test suite passes (unit + integration stubs)
+
+# Integration tests — require ADC credentials + deployed Cloud Run URL
+# Run these after deploying to Cloud Run in Phase 4.2, not locally
+# backend/tests/integration/ — add full session flow tests here in PR-5
 
 # Smoke test — start server locally
 uvicorn main:app --reload &
@@ -337,11 +341,19 @@ grep -n "adk\|InMemorySession\|Runner\|context_agent\|lesson_agent\|help_agent\|
 - [ ] Verify health check: `curl https://<cloud-run-url>/health` → `{"status":"ok"}`
 
 ### 4.2 End-to-End Session Tests
-- [ ] Happy path: all quiz answers correct, no help triggered, session complete, Firestore updated
-- [ ] Help path (resolved): 2 wrong answers → HelpSession → resolved at turn 2 → quiz resumes
-- [ ] Help path (unresolved): 2 wrong answers → HelpSession → unresolved at turn 3 → `gemini_handoff_prompt` present
-- [ ] FSRS verification: after session complete, `learners/{uid}/concepts/{lesson_id}.next_review_at` is a future timestamp
-- [ ] New learner: `POST /session/start` for a UID with no Firestore document → creates profile, picks L01
+
+> These are backend integration tests hitting the deployed Cloud Run service with real Firestore and Gemini calls. Add them to `backend/tests/integration/` in PR-5. They require `CLOUD_RUN_URL` and ADC credentials — do not run locally without real GCP context.
+
+- [ ] Write `backend/tests/integration/test_session_e2e.py`:
+  - Happy path: `start → lesson → quiz question → quiz answer (correct) → complete`; verify Firestore `next_review_at` is a future timestamp
+  - Help path (resolved): 2 wrong answers → `trigger_help=True` → help turn 1–2 → `resolved=True` → quiz resumes
+  - Help path (unresolved): 3 help turns → `resolved=False`, `gemini_handoff_prompt` non-empty, `gemini_handoff_used=True` in summary
+  - New learner: `POST /session/start` for unknown UID → creates Firestore profile, returns `lesson_id=L01`
+  - FSRS write: after `complete`, `learners/{uid}/concepts/{lesson_id}.next_review_at` is a valid future ISO 8601 timestamp
+- [ ] Run integration tests against deployed Cloud Run:
+  ```bash
+  CLOUD_RUN_URL=https://<service-url> python -m pytest backend/tests/integration/ -v
+  ```
 
 ### 4.3 Load Test
 - [ ] Simulate 10 concurrent sessions against Cloud Run

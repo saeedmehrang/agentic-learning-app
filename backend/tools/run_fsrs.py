@@ -47,6 +47,8 @@ def run_fsrs(
     """
     if outcome not in ("correct", "incorrect"):
         raise ValueError(f"outcome must be 'correct' or 'incorrect', got {outcome!r}")
+    if fsrs_stability <= 0.0:
+        raise ValueError(f"fsrs_stability must be positive, got {fsrs_stability!r}")
 
     if outcome == "correct":
         new_stability: float = fsrs_stability * 2.0
