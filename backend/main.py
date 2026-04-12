@@ -26,7 +26,7 @@ from typing import Any, AsyncGenerator
 
 from fastapi import FastAPI, HTTPException
 from opentelemetry import trace as otel_trace
-from opentelemetry.exporter.gcp_trace import CloudTraceSpanExporter
+from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.propagate import set_global_textmap
 from opentelemetry.propagators.cloud_trace_propagator import CloudTraceFormatPropagator
