@@ -4,7 +4,7 @@
 # What this script does:
 #   1. Pre-flight checks  — verifies required tools and credentials
 #   2. Cloud Run cleanup  — deletes any deployed Cloud Run services
-#   3. Terraform destroy  — removes all 26 Terraform-managed resources
+#   3. Terraform destroy  — removes all Terraform-managed resources
 #   4. Secret cleanup     — force-deletes Secret Manager secrets (versions linger)
 #   5. State file cleanup — optionally removes local terraform.tfstate
 #
@@ -12,7 +12,7 @@
 #   ./infra/scripts/teardown.sh            # interactive confirmation
 #   ./infra/scripts/teardown.sh --yes      # skip confirmation (CI use only)
 #
-# WARNING: This is irreversible. All data in Cloud SQL and Firestore will be lost.
+# WARNING: This is irreversible. All data in Firestore will be lost.
 set -euo pipefail
 
 # ── Colour helpers ────────────────────────────────────────────────────────────
@@ -95,15 +95,14 @@ echo "  Project : $GCP_PROJECT_ID"
 echo "  Region  : $GCP_REGION"
 echo ""
 echo "  Resources to be destroyed:"
-echo "   • Cloud SQL instance  : learning-app-db (PostgreSQL — ALL DATA LOST)"
-echo "   • Firestore database  : (default)       (ALL DOCUMENTS LOST)"
-echo "   • Secret Manager      : DB_PASSWORD, DB_CONNECTION_NAME, GOOGLE_OAUTH_CLIENT_SECRET"
+echo "   • Firestore database  : (default)                    (ALL DOCUMENTS LOST)"
+echo "   • GCS pipeline bucket : agentic-learning-pipeline    (ALL OBJECTS LOST)"
+echo "   • Secret Manager      : GOOGLE_OAUTH_CLIENT_SECRET"
 echo "   • Service Account     : cloud-run-app-identity + all IAM bindings"
 echo "   • Artifact Registry   : agentic-learning (all Docker images)"
 echo "   • Firebase apps       : Android + iOS registrations"
 echo "   • Identity Platform   : Anonymous + Google Sign-In config"
 echo "   • Cloud Run services  : all services in $GCP_REGION (if deployed)"
-echo "   • VPC peering         : private IP range for Cloud SQL"
 echo ""
 echo -e "${YELLOW}NOTE: GCP APIs will NOT be disabled (no cost, safe to leave enabled).${RESET}"
 echo -e "${RED}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
@@ -146,7 +145,7 @@ echo ""
 echo -e "${BOLD}━━━  Step 2 / 4 — Terraform destroy  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 
 if [[ "$TF_HAS_STATE" == true ]]; then
-  info "Running terraform destroy (this can take 5–15 minutes for Cloud SQL + VPC peering)..."
+  info "Running terraform destroy (this can take several minutes)..."
   echo ""
   # tf.sh sources .env and cd's into the terraform directory, then runs terraform "$@"
   "$TF_WRAPPER" destroy -auto-approve
@@ -161,7 +160,7 @@ echo -e "${BOLD}━━━  Step 3 / 4 — Secret Manager cleanup  ━━━━�
 # Terraform destroys the secret resource but secret versions can linger in a
 # "DESTROY_SCHEDULED" state for up to 24 hours. Force-deleting ensures they're gone.
 
-SECRETS=("DB_PASSWORD" "DB_CONNECTION_NAME" "GOOGLE_OAUTH_CLIENT_SECRET")
+SECRETS=("GOOGLE_OAUTH_CLIENT_SECRET")
 
 for SECRET in "${SECRETS[@]}"; do
   if gcloud secrets describe "$SECRET" --project="$GCP_PROJECT_ID" >/dev/null 2>&1; then
@@ -232,6 +231,4 @@ echo "  ./infra/scripts/enable_apis.sh"
 echo "  ./infra/scripts/tf.sh init"
 echo "  ./infra/scripts/tf.sh apply"
 echo "  ./infra/scripts/push_secrets.sh"
-echo "  ./infra/scripts/enable_pgvector.sh"
-echo "  ./infra/scripts/apply_schema.sh"
 echo ""

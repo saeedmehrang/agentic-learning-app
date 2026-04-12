@@ -6,7 +6,6 @@ requires-python = "==3.13.*"
 dependencies = [
     "google-genai>=1.0.0",
     "google-auth>=2.0.0",
-    "google-cloud-aiplatform>=1.60.0",
     "pyyaml>=6.0",
     "pydantic-settings>=2.0",
     "tiktoken>=0.12.0",
@@ -17,12 +16,6 @@ dependencies = [
 # Not needed for local development.
 gcs = [
     "google-cloud-storage>=2.0",
-]
-# Extra deps for seed_db.py (Cloud SQL connector + pg8000 driver).
-# Not needed for generate_content.py or embed_content.py.
-seed = [
-    "cloud-sql-python-connector[pg8000]>=1.7.0",
-    "pg8000>=1.31.0",
 ]
 
 [dependency-groups]
@@ -40,10 +33,6 @@ py-modules = [
     "review_models",
     "token_usage_log",
     "generate_content",
-    "embed_content",
-    "seed_db",
-    "validate_embeddings",
-    "validate_db",
     "count_tokens",
 ]
 
