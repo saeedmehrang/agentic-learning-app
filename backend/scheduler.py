@@ -105,6 +105,9 @@ def pick_next_lesson(concepts: list[dict]) -> dict:
     # --- Pass 1: overdue concepts (next_review_at in the past) ---------------
     overdue: list[dict] = []
     for c in concepts:
+        if not c.get("lesson_id"):
+            logger.warning("Concept missing lesson_id — skipping: %s", c)
+            continue
         raw_ts = c.get("next_review_at")
         if raw_ts is None:
             continue
@@ -127,7 +130,10 @@ def pick_next_lesson(concepts: list[dict]) -> dict:
         # Pick the most overdue (earliest next_review_at)
         chosen = min(overdue, key=lambda x: x["_review_at"])
         lesson_id = chosen["lesson_id"]
-        mastery = float(chosen.get("mastery_score", 0.0))
+        try:
+            mastery = float(chosen.get("mastery_score", 0.0))
+        except (ValueError, TypeError):
+            mastery = 0.0
         tier = _tier_for_mastery(mastery)
         logger.info(
             "Scheduler: overdue concept selected",
@@ -140,9 +146,23 @@ def pick_next_lesson(concepts: list[dict]) -> dict:
         }
 
     # --- Pass 2: all future — pick lowest mastery_score ----------------------
-    chosen = min(concepts, key=lambda c: float(c.get("mastery_score", 0.0)))
+    valid = [c for c in concepts if c.get("lesson_id")]
+    if not valid:
+        logger.warning("No valid concepts after filtering — falling back to L01")
+        return {
+            "lesson_id": "L01",
+            "tier": "beginner",
+            "character_id": MODULE_CHARACTER[1],
+        }
+    def _safe_mastery(c: dict) -> float:
+        try:
+            return float(c.get("mastery_score", 0.0))
+        except (ValueError, TypeError):
+            return 0.0
+
+    chosen = min(valid, key=_safe_mastery)
     lesson_id = chosen["lesson_id"]
-    mastery = float(chosen.get("mastery_score", 0.0))
+    mastery = _safe_mastery(chosen)
     tier = _tier_for_mastery(mastery)
     logger.info(
         "Scheduler: no overdue concepts — lowest mastery selected",

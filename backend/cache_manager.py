@@ -143,9 +143,11 @@ def build_caches(approved_dir: Path | None = None) -> None:
     if os.environ.get("ENABLE_LESSON_CACHE", "false").lower() != "true":
         logger.info("Lesson cache disabled (ENABLE_LESSON_CACHE != true)")
         _enabled = False
+        _cache_store.clear()
         return
 
     _enabled = True
+    _cache_store.clear()
 
     if approved_dir is None:
         approved_dir = (
@@ -172,17 +174,13 @@ def build_caches(approved_dir: Path | None = None) -> None:
             handle = _create_cache(block_idx, prompt)
             _cache_store[block_idx] = {
                 "handle": handle,
-                "expires_at": datetime.now(tz=timezone.utc).replace(
-                    second=datetime.now(tz=timezone.utc).second
-                ).replace(microsecond=0),
+                "prompt": prompt,
+                "expires_at": datetime.now(tz=timezone.utc).timestamp() + _CACHE_TTL_SECONDS,
             }
-            # Store prompt for lazy refresh
-            _cache_store[block_idx]["prompt"] = prompt
-            _cache_store[block_idx]["expires_at"] = datetime.now(
-                tz=timezone.utc
-            ).timestamp() + _CACHE_TTL_SECONDS
         except Exception as exc:
-            logger.error("Failed to create cache for block_%d: %s", block_idx, exc, exc_info=True)
+            logger.error(
+                "Failed to create cache for block_%d: %s", block_idx, exc, exc_info=True
+            )
 
 
 def get_cache(lesson_id: str) -> Any | None:
