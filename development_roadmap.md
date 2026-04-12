@@ -10,7 +10,7 @@
 | Phase 0 | GCP & Firebase Setup | ☐ |
 | Phase 1 | Content Generation | ☐ |
 | Phase 2 | Character Asset Production | ☐ |
-| Phase 3 | Backend Simplification Refactor | 🔄 PR-1 ✅ |
+| Phase 3 | Backend Simplification Refactor | 🔄 PR-1 ✅ PR-2 ✅ |
 | Phase 4 | Integration & Load Testing | ☐ |
 | Phase 5 | Flutter App | ☐ |
 | Phase 6 | Trial Launch & Iteration | ☐ |
@@ -154,35 +154,19 @@ See `notes/simplification-plan-remove-rag-adk.md` for full design rationale.
 
 ---
 
-### PR-2: `scheduler.py` + `cache_manager.py`
+### PR-2: `scheduler.py` + `cache_manager.py` ✅ merged
 
-**Goal:** Implement pure-Python lesson scheduler and optional Gemini context cache manager. No HTTP changes yet.
+**What was done:**
+- `scheduler.py`: pure-Python `pick_next_lesson()` — overdue-first selection, mastery fallback, tier thresholds (<0.4 beginner, <0.75 intermediate), module→character mapping for all 9 modules
+- `cache_manager.py`: Gemini context cache builder — 3 blocks (L01–L10, L11–L20, L21–L29), 1-hour TTL, lazy refresh on expiry, safe no-op when `ENABLE_LESSON_CACHE=false`
+- Hardened both against malformed Firestore inputs: missing `lesson_id`, non-numeric `mastery_score`, timezone-naive datetimes, partial cache build failures
+- Fixed `run_fsrs`: raises `ValueError` for `fsrs_stability <= 0` (would have silently produced past `next_review_at`)
+- 174 tests passing (57 new edge-case tests added)
 
-**Requirements before opening:** PR-1 merged.
-
-**Files created:**
-- `backend/scheduler.py` — `pick_next_lesson(uid, concepts: list[dict]) -> dict`
-  - Selects concept with earliest `next_review_at` in the past
-  - Falls back to lowest `mastery_score` if all concepts are scheduled for the future
-  - Returns `{lesson_id, tier, module_character_id}`
-  - Module → character mapping lives here (replaces `MODULE_CHARACTER` from context_agent.py)
-  - Pure Python, no I/O, no LLM
-- `backend/cache_manager.py` — `build_caches()` and `get_cache(lesson_id) -> CachedContent | None`
-  - Reads `ENABLE_LESSON_CACHE` env var (default `false`)
-  - When enabled: at startup loads approved JSON files from GCS/local, groups into 3 blocks (L01–L10, L11–L20, L21–L29), calls `google.generativeai.caching.CachedContent.create()` per block (1-hour TTL), stores handles in module-level dict
-  - `get_cache(lesson_id)` returns the block handle for that lesson, or `None` if disabled or TTL expired (lazy refresh on expiry)
-  - When disabled: `build_caches()` is a no-op; `get_cache()` always returns `None`
-
-**Files created (tests):**
-- `backend/tests/test_scheduler.py` — unit tests: new learner (no concepts), all future (mastery fallback), mixed past/future, character mapping completeness
-- `backend/tests/test_cache_manager.py` — unit tests with mocked `google.generativeai.caching`: cache disabled (no-op), cache enabled (3 handles created), `get_cache` returns correct block, TTL expiry triggers refresh
-
-**Definition of Done:**
-```bash
-cd backend && ruff check . && mypy .
-python -m pytest backend/tests/test_scheduler.py backend/tests/test_cache_manager.py -v
-# all tests pass; no I/O or LLM calls in scheduler tests
-```
+**Notes for PR-3+:**
+- `cache_manager.get_cache(lesson_id)` returns `None` when disabled — `LessonSession.__init__` must handle `None` gracefully (don't pass it to `GenerativeModel` constructor)
+- `scheduler.pick_next_lesson()` signature is `(concepts: list[dict]) -> dict` — the Firestore concepts sub-collection fetch happens in `main.py` (PR-5), not in the scheduler
+- Tier thresholds: mastery < 0.4 → beginner, < 0.75 → intermediate, ≥ 0.75 → advanced — `LessonSession` must use the `tier` field from the scheduler result to select the correct approved JSON file
 
 ---
 
