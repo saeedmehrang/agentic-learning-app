@@ -32,6 +32,15 @@ provider "google-beta" {
 }
 
 # ---------------------------------------------------------------------------
+# APIs — core GCP services required by Cloud Run jobs and agents
+# ---------------------------------------------------------------------------
+
+resource "google_project_service" "vertex_ai_api" {
+  service            = "aiplatform.googleapis.com"
+  disable_on_destroy = false
+}
+
+# ---------------------------------------------------------------------------
 # Service Account — Cloud Run least-privilege identity
 # ---------------------------------------------------------------------------
 

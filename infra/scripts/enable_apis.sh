@@ -10,6 +10,7 @@ echo "Enabling required GCP APIs for project: $GCP_PROJECT_ID"
 gcloud services enable \
     run.googleapis.com \
     generativelanguage.googleapis.com \
+    aiplatform.googleapis.com \
     secretmanager.googleapis.com \
     artifactregistry.googleapis.com \
     storage.googleapis.com \
