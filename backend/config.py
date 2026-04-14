@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     gcp_project_id: str = "agentic-learning-app-e13cb"
     gcp_location: str = "us-central1"
 
+    # Content storage — GCS bucket for approved lesson files, outlines, and concept map.
+    # Set GCS_PIPELINE_BUCKET to the bucket name to read from GCS (production).
+    # Leave empty to fall back to local filesystem under courses/linux-basics/ (dev/tests).
+    gcs_pipeline_bucket: str = ""
+
     @field_validator("gcp_project_id", mode="before")
     @classmethod
     def _default_project_id(cls, v: str) -> str:

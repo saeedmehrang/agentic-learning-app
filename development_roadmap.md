@@ -10,7 +10,7 @@
 | Phase 0 | GCP & Firebase Setup | ☐ |
 | Phase 1 | Content Generation | ✅ |
 | Phase 2 | Character Asset Production | ☐ |
-| Phase 3 | Backend Simplification Refactor | 🔄 PR-1 ✅ PR-2 ✅ |
+| Phase 3 | Backend Simplification Refactor | 🔄 PR-1 ✅ PR-2 ✅ PR-3 ✅ |
 | Phase 4 | Integration & Load Testing | ☐ |
 | Phase 5 | Flutter App | ☐ |
 | Phase 6 | Trial Launch & Iteration | ☐ |
@@ -149,49 +149,64 @@ See `notes/simplification-plan-remove-rag-adk.md` for full design rationale.
 - Fixed `run_fsrs`: raises `ValueError` for `fsrs_stability <= 0` (would have silently produced past `next_review_at`)
 - 174 tests passing (57 new edge-case tests added)
 
-**Notes for PR-3+:**
-- `cache_manager.get_cache(lesson_id)` returns `None` when disabled — `LessonSession.__init__` must handle `None` gracefully (don't pass it to `GenerativeModel` constructor)
+**Notes for PR-3+ (historical — resolved in PR-3):**
+- `cache_manager.get_cache(lesson_id)` returns `None` when disabled — handled in `LessonSession.__init__` by passing `cached_content=handle.name` only when non-None
 - `scheduler.pick_next_lesson()` signature is `(concepts: list[dict]) -> dict` — the Firestore concepts sub-collection fetch happens in `main.py` (PR-5), not in the scheduler
-- Tier thresholds: mastery < 0.4 → beginner, < 0.75 → intermediate, ≥ 0.75 → advanced — `LessonSession` must use the `tier` field from the scheduler result to select the correct approved JSON file
+- Tier thresholds: mastery < 0.4 → beginner, < 0.75 → intermediate, ≥ 0.75 → advanced — implemented in `LessonSession` via the `tier` field from the scheduler result
 
 ---
 
-### PR-3: `lesson_session.py`
+### PR-3: `lesson_session.py` + GCS content loading ✅ merged
 
-**Goal:** Implement stateful multi-turn Gemini chat wrapping lesson teaching, quiz loop, and HelpSession (3-turn cap).
+**What was done:**
 
-**Requirements before opening:** PR-2 merged. At least a few approved lesson JSON files in `pipeline/approved/` for smoke testing.
+**GCS-only content loading (replaces local-filesystem approach):**
+- `backend/config.py`: added `gcs_pipeline_bucket: str = ""` — reads `GCS_PIPELINE_BUCKET` env var
+- `backend/pyproject.toml`: added `google-cloud-storage>=2.0` and `google-genai>=1.0` as explicit deps
+- `backend/cache_manager.py`: refactored with GCS-aware loaders:
+  - `_load_from_gcs(bucket_name)` — lists `linux-basics/pipeline/approved/` blobs, downloads all JSON
+  - `_load_from_local(approved_dir)` — unchanged local loader (tests / local dev)
+  - `_load_approved_content(approved_dir)` — routes to GCS or local based on config
+  - `_load_yaml_from_gcs` / `_load_json_from_gcs` — fetchers for `outlines.yaml` + `concept_map.json`
+  - `build_caches()` now returns `tuple[lesson_store, outlines, concept_map]` (previously `None`)
+  - `_load_approved_files(path)` kept as backward-compat alias for existing tests
+- `backend/main.py`: implemented the two `# TODO PR-2` lifespan stubs — calls `build_caches()` at startup, populates `_lesson_store`, `_outlines`, `_concept_map` module-level dicts
 
-**Files created:**
-- `backend/lesson_session.py` — `LessonSession` class
-  - `__init__`: loads lesson content from in-memory store (set at startup), builds system prompt with `outlines.yaml` + `concept_map.json` + current lesson JSON, starts `GenerativeModel.start_chat()` (with `cached_content` handle if available)
-  - `teach() -> dict` — Turn 1: returns `{lesson_text, character_emotion_state, key_concepts}`
+**`lesson_session.py`:**
+- `LessonSession` — stateful multi-turn `google.genai` chat using `client.chats.create()`:
+  - `__init__`: receives `lesson_content`, `outlines`, `concept_map` (injected from `main.py`); builds system prompt; passes `cached_content=cache_handle.name` in `GenerateContentConfig` when caching enabled (`None` is safe when disabled)
+  - `teach() -> dict` — returns `{lesson_text, character_emotion_state, key_concepts}`
   - `next_question() -> dict` — returns `{question_text, format, options, character_emotion_state}`
-  - `evaluate_answer(answer: str) -> dict` — returns `{correct, explanation, concept_score_delta, character_emotion_state, trigger_help?}`
-  - Tracks consecutive wrong answers per concept; sets `trigger_help: True` on 2nd consecutive wrong
-  - `HelpSession` nested class (or separate `help_session.py`):
-    - `respond(message: str) -> dict` — returns `{resolved, character_emotion_state, gemini_handoff_prompt?}`
-    - `increment_turn()` raises `RuntimeError` after turn 3 (hard cap enforced in Python, not prompt)
-    - Uses separate `start_chat()` with lesson context injected as first message
-  - All JSON outputs validated against expected keys before returning
+  - `evaluate_answer(answer) -> dict` — returns `{correct, explanation, concept_score_delta, character_emotion_state, trigger_help}`; tracks consecutive wrong answers per concept (key = question index); `trigger_help=True` + `help_session` created on 2nd consecutive wrong
+  - `help_session: HelpSession | None` — set automatically when `trigger_help` fires
+- `HelpSession` — separate `client.chats.create()` with `help_model` (Flash-Lite); hard cap 3 turns; `RuntimeError` on 4th call; fallback `gemini_handoff_prompt` generated if Gemini omits it on turn 3
+- `_extract_json()` — strips markdown fences, extracts JSON from Gemini response text
+- `_validate_keys()` — raises `ValueError` on missing required keys (loud failures)
+- `_require_text()` — raises `ValueError` if `response.text` is `None` (SDK safety block guard)
 
-**Files created (tests):**
-- `backend/tests/test_lesson_session.py` — unit tests with mocked `google.generativeai.GenerativeModel`:
-  - Teach phase returns correct schema
-  - Quiz question returns correct format
-  - Correct answer: `correct=True`, positive delta, `celebrating` emotion
-  - Wrong answer once: `correct=False`, `encouraging`, no trigger
-  - Wrong answer twice: `trigger_help=True`
-  - Help resolved at turn 2: `resolved=True`
-  - Help unresolved at turn 3: `resolved=False`, `gemini_handoff_prompt` present
-  - Help turn 4 attempt: `RuntimeError` raised
+**Tests — 207 passing (33 new in test_lesson_session.py, 8 new in test_cache_manager.py):**
+- Init with/without cache handle, question count
+- teach() schema + missing-key error
+- next_question() schema + IndexError when exhausted
+- Correct answer: schema, index advances, consecutive-wrong counter resets
+- First wrong: no trigger; second consecutive wrong: trigger_help=True, HelpSession created
+- HelpSession: resolved turn 1, handoff on turn 3, RuntimeError turn 4, fallback handoff
+- `_extract_json`: bare JSON, fenced, prose-wrapped, no-JSON error, invalid-JSON error
+- GCS loader: blob parsing, skip non-JSON/malformed/unreadable blobs, routing, tuple return
 
-**Definition of Done:**
+**Operational step required before first Cloud Run deploy:**
 ```bash
-cd backend && ruff check . && mypy .
-python -m pytest backend/tests/test_lesson_session.py -v
-# all 8+ tests pass; Gemini SDK mocked throughout
+gsutil cp courses/linux-basics/outlines.yaml \
+  gs://agentic-learning-pipeline/linux-basics/outlines.yaml
+gsutil cp courses/linux-basics/concept_map.json \
+  gs://agentic-learning-pipeline/linux-basics/concept_map.json
 ```
+
+**Notes for PR-4+:**
+- Gemini SDK in use: `google.genai` (new SDK, `google-genai` package) — NOT `google.generativeai`. All new backend code must use `genai.Client()` + `client.chats.create()` pattern
+- `LessonSession.help_session` is set on `trigger_help` — PR-5 `main.py` must store the `LessonSession` object on `SessionData` (or equivalent) so `/session/{id}/help` routes through `session.help_session.respond()`
+- `_lesson_store`, `_outlines`, `_concept_map` are module-level in `main.py` — pass as constructor args to `LessonSession` in `session_start`
+- `ty` (Astral) is the type checker — all PR-3 files pass `ty check`; pre-existing errors in older test files are not new
 
 ---
 

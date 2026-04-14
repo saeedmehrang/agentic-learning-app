@@ -82,15 +82,40 @@ class SessionData:
 _sessions: dict[str, SessionData] = {}
 
 # ---------------------------------------------------------------------------
+# Course content stores — populated at startup by build_caches()
+# Injected into LessonSession on every POST /session/start.
+# ---------------------------------------------------------------------------
+
+# lesson_store: "{lesson_id}:{tier}" → parsed lesson JSON dict (87 entries in prod)
+_lesson_store: dict[str, dict[str, Any]] = {}
+# Parsed outlines.yaml — list of lesson definition dicts
+_outlines: Any = {}
+# Parsed concept_map.json — dict with lessons, modules, cross_lesson_requirements
+_concept_map: Any = {}
+
+# ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    global _lesson_store, _outlines, _concept_map
     logger.info("Backend starting", extra={"app_env": settings.app_env})
-    # TODO PR-2: cache_manager.build_caches()
-    # TODO PR-2: load approved lesson JSON files into in-memory store
+
+    import cache_manager as _cache_manager
+
+    _lesson_store, _outlines, _concept_map = _cache_manager.build_caches()
+    logger.info(
+        "Content loaded at startup",
+        extra={
+            "lesson_count": len(_lesson_store),
+            "cache_enabled": _cache_manager.is_enabled(),
+            "outlines_loaded": bool(_outlines),
+            "concept_map_loaded": bool(_concept_map),
+        },
+    )
+
     yield
     logger.info("Backend shutting down")
 
@@ -195,7 +220,7 @@ async def session_start(request: SessionStartRequest) -> SessionStartResponse:
     with _tracer.start_as_current_span("session.start") as span:
         span.set_attribute("uid", request.uid)
         try:
-            # TODO PR-2: replace stubs with scheduler.pick_next_lesson(uid)
+            # TODO PR-5: replace stubs with Firestore read + scheduler.pick_next_lesson(concepts)
             lesson_id = "L01"
             tier = "beginner"
             character_id = "tux_jr"
