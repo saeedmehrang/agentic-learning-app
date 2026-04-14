@@ -8,7 +8,7 @@
 | Phase | Title | Status |
 |---|---|---|
 | Phase 0 | GCP & Firebase Setup | ☐ |
-| Phase 1 | Content Generation | ☐ |
+| Phase 1 | Content Generation | ✅ |
 | Phase 2 | Character Asset Production | ☐ |
 | Phase 3 | Backend Simplification Refactor | 🔄 PR-1 ✅ PR-2 ✅ |
 | Phase 4 | Integration & Load Testing | ☐ |
@@ -62,10 +62,10 @@
 ### 1.2 Content Generation Pipeline
 - [x] `content-generation/generate_content.py` — reads outlines + concept map, calls Gemini per lesson × tier, writes to `pipeline/generated/`
 - [x] Prompt templates in `courses/linux-basics/prompts/`
-- [ ] **OPERATIONAL**: Run generation — `python content-generation/generate_content.py --resume`
+- [x] **OPERATIONAL**: Run generation — `python content-generation/generate_content.py --resume`
   - 87 total calls (29 lessons × 3 tiers)
-- [ ] **OPERATIONAL**: Human review — move approved files to `pipeline/approved/{tier}/L##.json`
-- [ ] **OPERATIONAL**: Validate quiz questions — every question has `answer`, `options[]`, `explanation`; all formats are tap-to-select
+- [x] **OPERATIONAL**: Human review — move approved files to `pipeline/approved/{tier}/L##.json`
+- [x] **OPERATIONAL**: Validate quiz questions — every question has `answer`, `options[]`, `explanation`; all formats are tap-to-select
 
 ### 1.3 Full Course Generation via Cloud Run Job
 
@@ -75,32 +75,18 @@
 >
 > **Why all 29 lessons now:** context caching requires ≥32 K tokens per block (Vertex AI minimum). 2 lessons × 3 tiers ≈ 6 K tokens — not enough to test caching. Generating all 29 now costs ~$0.20, is idempotent via `--resume`, and unblocks Phase 4 cache testing. Human review can happen in parallel with PR-3 and PR-4 implementation.
 
-- [ ] **OPERATIONAL**: Rebuild and push the content-generation image (picks up PR-1 Dockerfile changes):
-  ```bash
-  gcloud builds submit --config infra/cloudbuild/content-generate.yaml .
-  ```
-- [ ] **OPERATIONAL**: Run generation for all remaining lessons (skips the 2 already generated):
-  ```bash
-  gcloud run jobs execute content-generate \
-    --region us-central1 \
-    --args="--resume" \
-    --wait
-  ```
-  Expected: 81 new files generated (87 total − 6 already done), model = `gemini-2.5-flash`, ~$0.18 cost
-- [ ] **OPERATIONAL**: Human review — read generated files in GCS (`pipeline/generated/`), move approved to `pipeline/approved/{tier}/L##.json`; flag any for regeneration with `--lesson L## --tier Beginner`
-- [ ] **OPERATIONAL**: Validate quiz questions — every question has `answer`, `options[]`, `explanation`; all formats are tap-to-select
+- [x] **OPERATIONAL**: Rebuild and push the content-generation image (picks up PR-1 Dockerfile changes)
+- [x] **OPERATIONAL**: Run generation for all 29 lessons via Cloud Run Job — all 87 files generated
+- [x] **OPERATIONAL**: Human review complete — approved files in GCS `gs://agentic-learning-pipeline/linux-basics/pipeline/approved/`
+- [x] **OPERATIONAL**: Validate quiz questions — every question has `answer`, `options[]`, `explanation`; all formats are tap-to-select
 
 ### 1.4 Content Verification
 
 No embedding or database loading required. Approved JSON files are the terminal artefact.
 
-- [ ] Verify all 87 approved files exist in GCS:
-  ```bash
-  gsutil ls "gs://$GCS_PIPELINE_BUCKET/linux-basics/pipeline/approved/**/*.json" | wc -l
-  # → expect 87
-  ```
-- [ ] Spot-check 3–5 files for correct JSON structure (`lesson`, `quiz` keys present, `questions` non-empty)
-- [ ] Confirm `outlines.yaml` and `concept_map.json` are current and consistent with approved content
+- [x] Verify all 87 approved files exist in GCS: `gs://agentic-learning-pipeline/linux-basics/pipeline/approved/`
+- [x] Spot-check 3–5 files for correct JSON structure (`lesson`, `quiz` keys present, `questions` non-empty)
+- [x] Confirm `outlines.yaml` and `concept_map.json` are current and consistent with approved content
 
 ---
 
