@@ -8,19 +8,7 @@ Produce a YAML file named `outlines.yaml` containing an ordered list of all 29 l
 
 ## Course Structure
 
-The course covers 9 modules in this fixed order:
-
-| Module | Title                    | Lessons         |
-|--------|--------------------------|-----------------|
-| 1      | Linux Foundations        | L01–L03         |
-| 2      | The Command Line         | L04–L07         |
-| 3      | The Filesystem           | L08–L11         |
-| 4      | Working with Files       | L12–L14         |
-| 5      | Users and Permissions    | L15–L17         |
-| 6      | Processes and Services   | L18–L20         |
-| 7      | Networking Basics        | L21–L23         |
-| 8      | Package Management       | L24–L25         |
-| 9      | Shell Scripting          | L26–L29         |
+See the file ../course_structure_summary.md
 
 ## Output Format
 
