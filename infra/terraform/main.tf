@@ -88,6 +88,12 @@ resource "google_project_iam_member" "metric_writer" {
   member  = "serviceAccount:${google_service_account.cloud_run_sa.email}"
 }
 
+resource "google_project_iam_member" "vertex_ai_user" {
+  project = var.project_id
+  role    = "roles/aiplatform.user"
+  member  = "serviceAccount:${google_service_account.cloud_run_sa.email}"
+}
+
 # ---------------------------------------------------------------------------
 # GCS pipeline bucket — stores all intermediate content generation outputs:
 # generated/, reviewed/, approved/, embedded/, pipeline_log.json
