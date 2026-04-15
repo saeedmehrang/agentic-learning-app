@@ -91,7 +91,7 @@ def test_next_review_at_is_valid_iso8601_utc_in_future() -> None:
     result = run_fsrs(CONCEPT_ID, BASE_STABILITY, BASE_DIFFICULTY, BASE_MASTERY, "correct")
     after = datetime.now(UTC)
 
-    next_review_str: str = result["next_review_at"]  # type: ignore[assignment]
+    next_review_str: str = result["next_review_at"]
     # datetime.fromisoformat handles the +00:00 / UTC suffix produced by .isoformat()
     next_review = datetime.fromisoformat(next_review_str)
 

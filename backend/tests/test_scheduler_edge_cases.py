@@ -90,7 +90,7 @@ class TestMalformedConcepts:
 class TestTimezoneNaiveDatetimes:
     def test_timezone_naive_overdue_datetime_treated_as_utc(self) -> None:
         """A naive datetime in the past should be treated as UTC and count as overdue."""
-        naive_past = datetime.utcnow() - timedelta(hours=5)  # no tzinfo
+        naive_past = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=5)  # no tzinfo
         concepts = [
             {"lesson_id": "L04", "mastery_score": 0.5, "next_review_at": naive_past},
             {"lesson_id": "L05", "mastery_score": 0.5,
@@ -101,7 +101,7 @@ class TestTimezoneNaiveDatetimes:
 
     def test_timezone_naive_future_datetime_not_overdue(self) -> None:
         """A naive datetime far in the future must not count as overdue."""
-        naive_future = datetime.utcnow() + timedelta(days=7)
+        naive_future = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=7)
         concepts = [
             {"lesson_id": "L06", "mastery_score": 0.3, "next_review_at": naive_future},
             {"lesson_id": "L07", "mastery_score": 0.1, "next_review_at": None},

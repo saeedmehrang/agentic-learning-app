@@ -6,6 +6,8 @@ conditions not exercised by the main test_session_api.py suite.
 """
 from __future__ import annotations
 
+from collections.abc import Generator
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -17,7 +19,7 @@ from main import _sessions, app
 
 
 @pytest.fixture()
-def client() -> TestClient:
+def client() -> Generator[TestClient, None, None]:
     with TestClient(app, raise_server_exceptions=True) as c:
         yield c
 

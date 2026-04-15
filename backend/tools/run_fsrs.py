@@ -15,6 +15,7 @@ next_review_at = now(UTC) + timedelta(days=stability)
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 
 def run_fsrs(
@@ -23,7 +24,7 @@ def run_fsrs(
     fsrs_difficulty: float,
     mastery_score: float,
     outcome: str,  # "correct" | "incorrect"
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """
     Update FSRS scheduling parameters for a single concept after a review.
 

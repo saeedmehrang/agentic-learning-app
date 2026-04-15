@@ -113,9 +113,9 @@ class TestRepeatedIncorrect:
         mastery = 0.6
         for _ in range(5):
             result = run_fsrs(CONCEPT_ID, stability, difficulty, mastery, "incorrect")
-            stability = float(result["fsrs_stability"])  # type: ignore[arg-type]
-            difficulty = float(result["fsrs_difficulty"])  # type: ignore[arg-type]
-            mastery = float(result["mastery_score"])  # type: ignore[arg-type]
+            stability = float(result["fsrs_stability"])
+            difficulty = float(result["fsrs_difficulty"])
+            mastery = float(result["mastery_score"])
             assert stability == pytest.approx(1.0)
 
 

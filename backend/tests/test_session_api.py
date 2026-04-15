@@ -8,6 +8,8 @@ cleans up after itself to avoid cross-test pollution.
 """
 from __future__ import annotations
 
+from collections.abc import Generator
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -18,14 +20,14 @@ from main import _sessions, app
 # ---------------------------------------------------------------------------
 
 @pytest.fixture()
-def client() -> TestClient:
+def client() -> Generator[TestClient, None, None]:
     """Synchronous TestClient (ASGI transport, no real network)."""
     with TestClient(app, raise_server_exceptions=True) as c:
         yield c
 
 
 @pytest.fixture(autouse=True)
-def _clear_sessions() -> None:
+def _clear_sessions() -> Generator[None, None, None]:
     """Isolate each test — wipe the in-memory session store before and after."""
     _sessions.clear()
     yield

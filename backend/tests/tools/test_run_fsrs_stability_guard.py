@@ -33,5 +33,5 @@ class TestStabilityInputGuard:
     def test_next_review_always_in_future_for_valid_stability(self) -> None:
         from datetime import UTC, datetime
         result = run_fsrs(CID, 1.0, 5.0, 0.5, "correct")
-        next_review = datetime.fromisoformat(result["next_review_at"])  # type: ignore[arg-type]
+        next_review = datetime.fromisoformat(result["next_review_at"])
         assert next_review > datetime.now(UTC)
