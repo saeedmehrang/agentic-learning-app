@@ -46,7 +46,18 @@ def _to_quiz(client: TestClient, sid: str) -> None:
 
 
 def _set_phase(sid: str, phase: str) -> None:
+    from unittest.mock import MagicMock
     _sessions[sid].phase = phase
+    # When forcing to help phase, inject a mock help_session so the endpoint
+    # doesn't 409 on "no active HelpSession".
+    if phase == "help" and _sessions[sid].lesson_session.help_session is None:
+        mock_help = MagicMock()
+        mock_help.respond.return_value = {
+            "resolved": False,
+            "character_emotion_state": "helping",
+            "gemini_handoff_prompt": None,
+        }
+        _sessions[sid].lesson_session.help_session = mock_help
 
 
 # ---------------------------------------------------------------------------

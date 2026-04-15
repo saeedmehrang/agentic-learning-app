@@ -3,22 +3,19 @@ FastAPI entrypoint for the agentic learning backend.
 
 Session lifecycle (per-turn interactive API)
 --------------------------------------------
-1. POST  /session/start            → Pure-Python scheduler picks next lesson.
-                                     Returns session_id + {lesson_id, tier, character_id}.
-2. GET   /session/{id}/lesson      → LessonSession teaching phase (Turn 1).
-3. GET   /session/{id}/quiz/question → LessonSession quiz question.
-4. POST  /session/{id}/quiz/answer → LessonSession answer evaluation.
-5. POST  /session/{id}/help        → HelpSession (max 3 turns, hard-capped in Python).
-6. POST  /session/{id}/complete    → SummaryCall + FSRS + Firestore writes.
-
-All ADK / google-adk dependencies have been removed (PR-1).
-LessonSession, HelpSession, SummaryCall are implemented in PR-3 and PR-4.
-This file contains the HTTP skeleton wired to stub handlers until those PRs land.
+1. POST  /session/start            → Firestore read + scheduler picks next lesson.
+                                     Creates LessonSession. Returns session_id + metadata.
+2. GET   /session/{id}/lesson      → LessonSession.teach() (Turn 1).
+3. GET   /session/{id}/quiz/question → LessonSession.next_question().
+4. POST  /session/{id}/quiz/answer → LessonSession.evaluate_answer().
+5. POST  /session/{id}/help        → HelpSession.respond() (max 3 turns, hard-capped).
+6. POST  /session/{id}/complete    → summary_call.run_summary() + Firestore writes.
 """
 from __future__ import annotations
 
 import logging
 import os
+import time
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -36,6 +33,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from pydantic import BaseModel
 
 from config import settings
+from lesson_session import LessonSession
 from logging_config import configure_logging
 
 os.environ.setdefault("GOOGLE_CLOUD_PROJECT", settings.gcp_project_id)
@@ -72,9 +70,13 @@ class SessionData:
     lesson_id: str
     tier: str
     character_id: str
+    # LessonSession instance for this session — set in session_start
+    lesson_session: Any = None
+    # Running score deltas per concept: concept_id → cumulative delta
+    quiz_scores: dict[str, float] = field(default_factory=dict)
     quiz_questions_asked: int = 0
     quiz_correct: int = 0
-    session_start_ts: float = field(default_factory=lambda: __import__("time").time())
+    session_start_ts: float = field(default_factory=time.time)
     help_turn_count: int = 0
     phase: str = "lesson"  # lesson | quiz | help | complete
 
@@ -204,6 +206,43 @@ def _get_session(session_id: str) -> SessionData:
     return data
 
 
+def _read_learner_concepts(uid: str) -> list[dict[str, Any]]:
+    """
+    Read the learner's concept records from Firestore.
+
+    Returns a flat list of concept dicts, each containing at minimum:
+        lesson_id, mastery_score, next_review_at.
+
+    For a brand-new learner with no Firestore documents this returns [].
+    Firestore errors are logged and treated as an empty list (scheduler
+    falls back to L01/beginner for new learners).
+    """
+    try:
+        from google.cloud import firestore
+
+        db = firestore.Client(project=settings.gcp_project_id)
+        concepts_ref = (
+            db.collection("learners")
+            .document(uid)
+            .collection("concepts")
+        )
+        docs = concepts_ref.stream()
+        concepts: list[dict[str, Any]] = []
+        for doc in docs:
+            data = doc.to_dict() or {}
+            # Each concepts document is keyed by lesson_id and contains per-concept
+            # FSRS fields. Flatten: produce one entry per document with lesson_id set.
+            data.setdefault("lesson_id", doc.id)
+            concepts.append(data)
+        return concepts
+    except Exception as exc:
+        logger.warning(
+            "Firestore concepts read failed for uid=%s — treating as new learner: %s",
+            uid, exc,
+        )
+        return []
+
+
 # ---------------------------------------------------------------------------
 # POST /session/start
 # ---------------------------------------------------------------------------
@@ -213,17 +252,47 @@ def _get_session(session_id: str) -> SessionData:
 async def session_start(request: SessionStartRequest) -> SessionStartResponse:
     """
     Start a new learning session.
-    Reads Firestore learner state, picks next lesson via pure-Python scheduler,
-    returns session_id + lesson metadata.
+    Reads Firestore learner concepts, picks next lesson via scheduler,
+    creates a LessonSession, returns session_id + lesson metadata.
     """
     session_id = str(uuid.uuid4())
     with _tracer.start_as_current_span("session.start") as span:
         span.set_attribute("uid", request.uid)
         try:
-            # TODO PR-5: replace stubs with Firestore read + scheduler.pick_next_lesson(concepts)
-            lesson_id = "L01"
-            tier = "beginner"
-            character_id = "tux_jr"
+            import cache_manager as _cache_manager
+            import scheduler as _scheduler
+
+            # 1. Firestore read — learner concepts
+            concepts = _read_learner_concepts(request.uid)
+
+            # 2. Scheduler picks next lesson
+            picked = _scheduler.pick_next_lesson(concepts)
+            lesson_id: str = picked["lesson_id"]
+            tier: str = picked["tier"]
+            character_id: str = picked["character_id"]
+
+            # 3. Look up lesson content from in-memory store
+            content_key = f"{lesson_id}:{tier}"
+            lesson_content = _lesson_store.get(content_key)
+            if lesson_content is None:
+                # Fall back gracefully — use empty content rather than 500
+                logger.warning(
+                    "Lesson content not found for %s — using empty dict", content_key
+                )
+                lesson_content = {"lesson_id": lesson_id, "tier": tier, "lesson": {}, "quiz": {}}
+
+            # 4. Get cache handle (None when caching disabled)
+            cache_handle = _cache_manager.get_cache(lesson_id)
+
+            # 5. Create LessonSession
+            lesson_session = LessonSession(
+                lesson_id=lesson_id,
+                tier=tier,
+                lesson_content=lesson_content,
+                outlines=_outlines,
+                concept_map=_concept_map,
+                cached_content=cache_handle,
+            )
 
             _sessions[session_id] = SessionData(
                 session_id=session_id,
@@ -231,6 +300,7 @@ async def session_start(request: SessionStartRequest) -> SessionStartResponse:
                 lesson_id=lesson_id,
                 tier=tier,
                 character_id=character_id,
+                lesson_session=lesson_session,
             )
 
             logger.info(
@@ -267,9 +337,7 @@ async def session_start(request: SessionStartRequest) -> SessionStartResponse:
 
 @app.get("/session/{session_id}/lesson")
 async def get_lesson(session_id: str) -> LessonResponse:
-    """
-    Deliver the lesson for this session (LessonSession teaching phase, Turn 1).
-    """
+    """Deliver the lesson (LessonSession.teach(), Turn 1)."""
     data = _get_session(session_id)
     if data.phase != "lesson":
         raise HTTPException(
@@ -278,12 +346,12 @@ async def get_lesson(session_id: str) -> LessonResponse:
     with _tracer.start_as_current_span("session.lesson") as span:
         span.set_attribute("session_id", session_id)
         try:
-            # TODO PR-3: replace stub with LessonSession.teach()
+            result = data.lesson_session.teach()
             data.phase = "quiz"
             return LessonResponse(
-                lesson_text="[Lesson content — implement in PR-3]",
-                character_emotion_state="teaching",
-                key_concepts=[],
+                lesson_text=result["lesson_text"],
+                character_emotion_state=result["character_emotion_state"],
+                key_concepts=result.get("key_concepts", []),
             )
         except HTTPException:
             raise
@@ -303,7 +371,7 @@ async def get_lesson(session_id: str) -> LessonResponse:
 
 @app.get("/session/{session_id}/quiz/question")
 async def get_quiz_question(session_id: str) -> QuizQuestionResponse:
-    """Request the next quiz question (LessonSession quiz phase)."""
+    """Request the next quiz question (LessonSession.next_question())."""
     data = _get_session(session_id)
     if data.phase not in ("quiz", "help"):
         raise HTTPException(
@@ -312,14 +380,16 @@ async def get_quiz_question(session_id: str) -> QuizQuestionResponse:
     with _tracer.start_as_current_span("session.quiz.question") as span:
         span.set_attribute("session_id", session_id)
         try:
-            # TODO PR-3: replace stub with LessonSession.next_question()
+            result = data.lesson_session.next_question()
             data.quiz_questions_asked += 1
             return QuizQuestionResponse(
-                question_text="[Quiz question — implement in PR-3]",
-                format="mc",
-                options=["A", "B", "C", "D"],
-                character_emotion_state="curious",
+                question_text=result["question_text"],
+                format=result["format"],
+                options=result.get("options", []),
+                character_emotion_state=result["character_emotion_state"],
             )
+        except IndexError:
+            raise HTTPException(status_code=409, detail="No more quiz questions")
         except HTTPException:
             raise
         except Exception as exc:
@@ -338,7 +408,7 @@ async def get_quiz_question(session_id: str) -> QuizQuestionResponse:
 
 @app.post("/session/{session_id}/quiz/answer")
 async def submit_quiz_answer(session_id: str, request: QuizAnswerRequest) -> QuizAnswerResponse:
-    """Submit a quiz answer and get evaluation."""
+    """Submit a quiz answer (LessonSession.evaluate_answer())."""
     data = _get_session(session_id)
     if data.phase not in ("quiz", "help"):
         raise HTTPException(
@@ -347,13 +417,27 @@ async def submit_quiz_answer(session_id: str, request: QuizAnswerRequest) -> Qui
     with _tracer.start_as_current_span("session.quiz.answer") as span:
         span.set_attribute("session_id", session_id)
         try:
-            # TODO PR-3: replace stub with LessonSession.evaluate_answer(request.answer)
+            result = data.lesson_session.evaluate_answer(request.answer)
+
+            # Track correct count
+            if result["correct"]:
+                data.quiz_correct += 1
+
+            # Accumulate concept score deltas (keyed by current question index)
+            concept_key = f"q{data.quiz_questions_asked}"
+            delta = float(result.get("concept_score_delta", 0.0))
+            data.quiz_scores[concept_key] = data.quiz_scores.get(concept_key, 0.0) + delta
+
+            # If help triggered, set phase to help so subsequent help requests are accepted
+            if result.get("trigger_help"):
+                data.phase = "help"
+
             return QuizAnswerResponse(
-                correct=False,
-                explanation="[Answer evaluation — implement in PR-3]",
-                concept_score_delta=0.0,
-                character_emotion_state="encouraging",
-                trigger_help=False,
+                correct=result["correct"],
+                explanation=result["explanation"],
+                concept_score_delta=delta,
+                character_emotion_state=result["character_emotion_state"],
+                trigger_help=result.get("trigger_help", False),
             )
         except HTTPException:
             raise
@@ -389,19 +473,32 @@ async def help_turn(session_id: str, request: HelpRequest) -> HelpResponse:
         span.set_attribute("session_id", session_id)
         span.set_attribute("help_turn", data.help_turn_count + 1)
         try:
+            help_session = data.lesson_session.help_session
+            if help_session is None:
+                raise HTTPException(
+                    status_code=409, detail="No active HelpSession for this quiz question"
+                )
+
+            result = help_session.respond(request.message)
             data.help_turn_count += 1
-            # TODO PR-3: replace stub with HelpSession.respond(request.message)
+
             turns_remaining = max(0, 3 - data.help_turn_count)
-            if data.help_turn_count >= 3:
+
+            # After cap or resolved: return to quiz phase
+            if data.help_turn_count >= 3 or result.get("resolved"):
                 data.phase = "quiz"
+
             return HelpResponse(
-                resolved=False,
-                character_emotion_state="helping",
-                gemini_handoff_prompt=None,
+                resolved=result.get("resolved", False),
+                character_emotion_state=result.get("character_emotion_state"),
+                gemini_handoff_prompt=result.get("gemini_handoff_prompt"),
                 turns_remaining=turns_remaining,
             )
         except HTTPException:
             raise
+        except RuntimeError as exc:
+            # HelpSession raises RuntimeError on 4th call — translate to 409
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except Exception as exc:
             logger.error(
                 "Help turn failed",
@@ -421,26 +518,32 @@ async def complete_session(
     session_id: str, request: SessionCompleteRequest
 ) -> SessionCompleteResponse:
     """
-    Run SummaryCall to write session record + FSRS updates to Firestore.
+    Run summary_call.run_summary() to write session record + FSRS updates to Firestore.
     """
     data = _get_session(session_id)
     with _tracer.start_as_current_span("session.complete") as span:
         span.set_attribute("session_id", session_id)
         try:
-            # TODO PR-4: replace stub with summary_call.run_summary(session_data)
-            import time as _time
-            summary: dict[str, Any] = {
+            import summary_call as _summary_call
+
+            time_on_task = (
+                request.time_on_task_seconds
+                if request.time_on_task_seconds != 0
+                else int(time.time() - data.session_start_ts)
+            )
+
+            session_input: dict[str, Any] = {
+                "uid": data.uid,
+                "session_id": data.session_id,
                 "lesson_id": data.lesson_id,
-                "tier_used": data.tier,
-                "quiz_questions_asked": data.quiz_questions_asked,
-                "quiz_correct": data.quiz_correct,
-                "time_on_task_seconds": (
-                    request.time_on_task_seconds or int(_time.time() - data.session_start_ts)
-                ),
+                "tier": data.tier,
+                "quiz_scores": data.quiz_scores,
+                "time_on_task_seconds": time_on_task,
                 "help_triggered": data.help_turn_count > 0,
                 "gemini_handoff_used": data.help_turn_count >= 3,
-                "summary_text": "[Summary — implement in PR-4]",
             }
+
+            summary = _summary_call.run_summary(session_input)
 
             logger.info(
                 "Session completed",
