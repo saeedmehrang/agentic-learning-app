@@ -164,7 +164,7 @@ class GcsBackend(StorageBackend):
         # extra is present (i.e. on Cloud Run). This avoids an ImportError on
         # local dev where the package is not installed.
         try:
-            from google.cloud import storage as gcs  # type: ignore[import-untyped]
+            from google.cloud import storage as gcs  # ty: ignore[unresolved-import]
         except ImportError as exc:
             raise ImportError(
                 "google-cloud-storage is not installed. "

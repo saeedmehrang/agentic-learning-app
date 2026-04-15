@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import google.api_core.exceptions
+import google.api_core.exceptions  # ty: ignore[unresolved-import]
 import pytest
 
 # ---------------------------------------------------------------------------
@@ -36,22 +36,22 @@ for mod_name, stub in _STUBS.items():
     sys.modules.setdefault(mod_name, stub)
 
 # config and review_models are local; stub them too so we don't need .env
-_config_stub = types.ModuleType("config")
+_config_stub: Any = types.ModuleType("config")
 _settings = MagicMock()
 _settings.gemini_model = "gemini-test"
 _settings.reviewer_model = "gemini-reviewer-test"
 _settings.generation_max_output_tokens = 8192
 _settings.reviewer_max_output_tokens = 4096
 _settings.concurrency_limit = 5
-_config_stub.settings = _settings
+_config_stub.settings = _settings  # ty: ignore[unresolved-attribute]
 sys.modules.setdefault("config", _config_stub)
 
-_review_stub = types.ModuleType("review_models")
-_review_stub.ReviewResult = MagicMock()  # type: ignore[attr-defined]
+_review_stub: Any = types.ModuleType("review_models")
+_review_stub.ReviewResult = MagicMock()  # ty: ignore[unresolved-attribute]
 sys.modules.setdefault("review_models", _review_stub)
 
-_token_stub = types.ModuleType("token_usage_log")
-_token_stub.PipelineLogger = MagicMock()  # type: ignore[attr-defined]
+_token_stub: Any = types.ModuleType("token_usage_log")
+_token_stub.PipelineLogger = MagicMock()  # ty: ignore[unresolved-attribute]
 sys.modules.setdefault("token_usage_log", _token_stub)
 
 # Now import the helpers

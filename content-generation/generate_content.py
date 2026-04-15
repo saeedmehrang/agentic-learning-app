@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-import google.api_core.exceptions
+import google.api_core.exceptions  # ty: ignore[unresolved-import]
 import google.auth
 import google.auth.transport.requests
 import google.genai as genai
@@ -215,7 +215,7 @@ def make_client() -> genai.Client:
 def _thinking_config(model: str, level: str | None) -> genai_types.ThinkingConfig | None:
     """Return ThinkingConfig only for Gemini 3 models; None otherwise."""
     if level is not None and model.startswith("gemini-3"):
-        return genai_types.ThinkingConfig(thinking_level=level)
+        return genai_types.ThinkingConfig(thinking_level=level)  # ty: ignore[invalid-argument-type]
     return None
 
 
@@ -246,9 +246,9 @@ def reviewer_config(max_output_tokens: int | None = None) -> genai_types.Generat
 # ---------------------------------------------------------------------------
 
 _RETRYABLE_EXCEPTIONS = (
-    google.api_core.exceptions.ResourceExhausted,
-    google.api_core.exceptions.ServiceUnavailable,
-    google.api_core.exceptions.DeadlineExceeded,
+    google.api_core.exceptions.ResourceExhausted,  # ty: ignore[unresolved-attribute]
+    google.api_core.exceptions.ServiceUnavailable,  # ty: ignore[unresolved-attribute]
+    google.api_core.exceptions.DeadlineExceeded,  # ty: ignore[unresolved-attribute]
 )
 _MAX_RETRIES = 3
 _RETRY_BASE_DELAY = 2.0
@@ -558,7 +558,7 @@ async def generate_one(
             elapsed = time.monotonic() - start
             msg = f'Response missing "lesson" or "quiz" key. Keys found: {list(raw_data.keys())}'
             logger.error(f"{label} FAILED ({elapsed:.1f}s): {msg}")
-            _write_error(generated_rel, msg, raw_text)
+            _write_error(generated_rel, msg, "")
             await usage_logger.update_progress(lesson_id, tier, "failed", error=msg)
             return lesson_id, tier, "failed"
 
@@ -704,10 +704,14 @@ async def run_pipeline(
     if not dry_run:
         client = make_client()
     else:
-        client = None  # type: ignore[assignment]
+        client = None
 
     semaphore = asyncio.Semaphore(settings.concurrency_limit)
     usage_logger = PipelineLogger()
+
+    # client is None only when dry_run=True; generate_one handles that internally.
+    # The assertion narrows the type for the static checker.
+    assert client is not None or dry_run
 
     tasks = []
     for lesson_outline in lessons:
@@ -722,7 +726,7 @@ async def run_pipeline(
                     quiz_prompt_template=quiz_prompt_template,
                     lesson_review_template=lesson_review_template,
                     quiz_review_template=quiz_review_template,
-                    client=client,
+                    client=client,  # ty: ignore[invalid-argument-type]
                     semaphore=semaphore,
                     usage_logger=usage_logger,
                     dry_run=dry_run,
