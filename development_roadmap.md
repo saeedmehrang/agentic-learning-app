@@ -10,7 +10,7 @@
 | Phase 0 | GCP & Firebase Setup | ☐ |
 | Phase 1 | Content Generation | ✅ |
 | Phase 2 | Character Asset Production | ☐ |
-| Phase 3 | Backend Simplification Refactor | 🔄 PR-1 ✅ PR-2 ✅ PR-3 ✅ |
+| Phase 3 | Backend Simplification Refactor | ✅ PR-1 ✅ PR-2 ✅ PR-3 ✅ PR-4 ✅ PR-5 ✅ |
 | Phase 4 | Integration & Load Testing | ☐ |
 | Phase 5 | Flutter App | ☐ |
 | Phase 6 | Trial Launch & Iteration | ☐ |
@@ -210,97 +210,62 @@ gsutil cp courses/linux-basics/concept_map.json \
 
 ---
 
-### PR-4: `summary_call.py` + Firestore writes
+### PR-4: `summary_call.py` + Firestore writes ✅ merged
 
-**Goal:** Implement single-shot Gemini summary call, FSRS update, and Firestore session record write.
-
-**Requirements before opening:** PR-3 merged.
-
-**Files created:**
+**What was done:**
 - `backend/summary_call.py` — `run_summary(session_data: dict) -> dict`
-  - Single `generate_content()` call to Gemini 2.5 Flash-Lite (no chat history)
-  - Input: `{lesson_id, tier, quiz_scores, time_on_task_seconds, help_triggered, gemini_handoff_used}`
-  - Calls `run_fsrs()` for each concept touched
-  - Returns session record dict matching Firestore schema
-  - Firestore write: `learners/{uid}/sessions/{session_id}` + `learners/{uid}/concepts/{lesson_id}` update
+  - Single `generate_content()` call to `settings.summary_model` (gemini-2.5-flash-lite); no chat history
+  - Input: `{uid, session_id, lesson_id, tier, quiz_scores, time_on_task_seconds, help_triggered, gemini_handoff_used, concept_fsrs}`
+  - `concept_outcomes` derived from Gemini response; falls back to `quiz_scores` if Gemini omits them
+  - Calls `run_fsrs()` for each concept touched; guards against corrupt stability (≤ 0) by resetting to default
+  - Returns full session record dict: `{session_id, uid, lesson_id, tier, quiz_scores, time_on_task_seconds, help_triggered, gemini_handoff_used, summary_text, concept_outcomes, fsrs_results, completed_at}`
+  - Firestore write (best-effort, errors logged but not re-raised):
+    - `learners/{uid}/sessions/{session_id}` — full session record via `.set()`
+    - `learners/{uid}/concepts/{lesson_id}` — FSRS state per concept via `.set(merge=True)`
+  - `gemini_handoff_used` coerced to `bool` before storage (privacy rule)
+- `backend/tests/test_summary_call.py` — 20 unit tests with mocked Gemini SDK and Firestore:
+  - All required session record fields and types
+  - `next_review_at` is future for correct and incorrect outcomes
+  - `gemini_handoff_used` is always `bool` (never prompt string)
+  - Correct Firestore paths for session + concept documents
+  - Concept update payload has all required FSRS fields (`fsrs_stability`, `fsrs_difficulty`, `mastery_score`, `next_review_at`, `last_reviewed_at`)
+  - Fallback `concept_outcomes` derived from `quiz_scores`
+  - Corrupt stability guard (≤ 0 reset to default)
+  - Firestore errors swallowed
+  - `completed_at` is valid ISO 8601 UTC
+  - `session_id` auto-generated when absent
 
-**Files created (tests):**
-- `backend/tests/test_summary_call.py` — unit tests with mocked Gemini SDK and mocked Firestore:
-  - Session record contains all required fields with correct types
-  - `next_review_at` is a future timestamp for a correct outcome
-  - `gemini_handoff_used` is boolean (never the prompt string)
-  - Firestore write called with correct paths
-
-**Definition of Done:**
-```bash
-cd backend && ruff check . && mypy .
-python -m pytest backend/tests/test_summary_call.py backend/tests/tools/test_run_fsrs.py -v
-```
+**Notes for PR-5:**
+- `run_summary()` returns the full session record — `main.py` returns it directly as `summary` in `SessionCompleteResponse`
+- The summary schema differs from the old stub: no `tier_used`, `quiz_questions_asked`, `quiz_correct` keys — these are tracked internally in `SessionData` but not forwarded to `run_summary`
+- `quiz_scores` passed to `run_summary` are concept-level deltas accumulated during the quiz phase (keyed by question index in current impl)
 
 ---
 
-### PR-5: `main.py` Rewire
+### PR-5: `main.py` Rewire ✅ merged
 
-**Goal:** Remove all ADK imports and wiring from `main.py`. Connect all HTTP endpoints to the new modules. HTTP API surface unchanged.
-
-**Requirements before opening:** PR-2, PR-3, PR-4 all merged.
-
-**Files modified:**
-- `backend/main.py`:
-  - Remove all `google.adk` imports, `InMemorySessionService`, `Runner` instances
-  - Import `scheduler`, `cache_manager`, `lesson_session`, `summary_call`
-  - Lifespan: call `cache_manager.build_caches()` at startup; load all approved JSON files into in-memory dict
-  - `POST /session/start {uid}`:
-    1. Firestore read (learner profile + concepts)
-    2. `scheduler.pick_next_lesson(concepts)` → `{lesson_id, tier, character_id}`
-    3. Create `LessonSession`, store in `_sessions[session_id]`
-    4. Return `{session_id, lesson_id, character_id, tier}`
-  - `GET /session/{id}/lesson` → `session.teach()`
-  - `GET /session/{id}/quiz/question` → `session.next_question()`
-  - `POST /session/{id}/quiz/answer {answer}` → `session.evaluate_answer(answer)`
-  - `POST /session/{id}/help {message}` → `session.help.respond(message)` (checks cap before calling)
-  - `POST /session/{id}/complete` → `summary_call.run_summary(session_data)`; delete `_sessions[session_id]`
-  - Keep all OpenTelemetry / Cloud Trace instrumentation unchanged
-
-**Definition of Done:**
-```bash
-cd backend && ruff check . && mypy .
-python -m pytest backend/tests/ -v  # full test suite passes (unit + integration stubs)
-
-# Integration tests — require ADC credentials + deployed Cloud Run URL
-# Run these after deploying to Cloud Run in Phase 4.2, not locally
-# backend/tests/integration/ — add full session flow tests here in PR-5
-
-# Smoke test — start server locally
-uvicorn main:app --reload &
-
-curl -s -X POST http://localhost:8000/session/start \
-  -H "Content-Type: application/json" \
-  -d '{"uid": "test-uid-001"}' | jq .
-# → { session_id, lesson_id, character_id, tier }
-
-SESSION_ID=<from above>
-
-curl -s http://localhost:8000/session/$SESSION_ID/lesson | jq .
-# → { lesson_text, character_emotion_state, key_concepts }
-
-curl -s http://localhost:8000/session/$SESSION_ID/quiz/question | jq .
-# → { question_text, format, options, character_emotion_state }
-
-curl -s -X POST http://localhost:8000/session/$SESSION_ID/quiz/answer \
-  -H "Content-Type: application/json" \
-  -d '{"answer": "A"}' | jq .
-# → { correct, explanation, concept_score_delta, character_emotion_state }
-
-curl -s -X POST http://localhost:8000/session/$SESSION_ID/complete \
-  -H "Content-Type: application/json" \
-  -d '{"time_on_task_seconds": 300}' | jq .
-# → { summary_text, fsrs_result, lesson_id }
-
-# Verify no ADK references remain in main.py
-grep -n "adk\|InMemorySession\|Runner\|context_agent\|lesson_agent\|help_agent\|summary_agent" backend/main.py
-# → must return no matches
-```
+**What was done:**
+- `backend/main.py` — all stub TODO handlers replaced with real module calls:
+  - Top-level `from lesson_session import LessonSession` (patchable in tests)
+  - `SessionData` dataclass extended: `lesson_session: Any`, `quiz_scores: dict[str, float]` fields added
+  - `_read_learner_concepts(uid)` — reads `learners/{uid}/concepts` sub-collection from Firestore; returns `[]` on any error (new learner falls back to L01/beginner via scheduler)
+  - `POST /session/start`: Firestore read → `scheduler.pick_next_lesson(concepts)` → lesson content lookup from `_lesson_store` → `cache_manager.get_cache(lesson_id)` → `LessonSession(...)` stored in `_sessions`
+  - `GET /session/{id}/lesson` → `data.lesson_session.teach()`; advances phase to `quiz`
+  - `GET /session/{id}/quiz/question` → `data.lesson_session.next_question()`; increments `quiz_questions_asked`; maps `IndexError` to 409
+  - `POST /session/{id}/quiz/answer` → `data.lesson_session.evaluate_answer(answer)`; tracks `quiz_correct`, accumulates `quiz_scores`; sets phase to `help` when `trigger_help=True`
+  - `POST /session/{id}/help` → `data.lesson_session.help_session.respond(message)`; 409 if `help_session is None`; `RuntimeError` from HelpSession mapped to 409; phase reverts to `quiz` after cap or `resolved=True`
+  - `POST /session/{id}/complete` → `summary_call.run_summary(session_input)`; deletes `_sessions[session_id]`
+  - All OpenTelemetry / Cloud Trace instrumentation unchanged
+  - Zero ADK references remain
+- `backend/tests/conftest.py` — new shared autouse fixture patches all external I/O at the `main.py` boundary:
+  - `main._read_learner_concepts` → `[]`
+  - `main.LessonSession` → factory returning a fresh `MagicMock` per instantiation (teach/next_question/evaluate_answer return fixed payloads)
+  - `summary_call.genai.Client` and `summary_call.firestore.Client` → MagicMocks
+- `backend/tests/test_session_api.py` and `test_session_api_edge_cases.py` updated:
+  - `_set_phase(sid, "help")` now also injects a mock `help_session` on the session's `lesson_session`
+  - `test_returns_summary_with_expected_keys` updated to new `run_summary` schema
+  - `test_quiz_stats_reflected_in_summary` updated (no longer checks `quiz_questions_asked` in summary)
+- 227 tests passing
 
 ---
 
