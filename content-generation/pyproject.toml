@@ -24,6 +24,7 @@ dev = [
     "pytest-asyncio>=0.23",
     "pytest-mock>=3.14",
     "ruff>=0.15.7",
+    "ty>=0.0.1a6",
 ]
 
 [tool.setuptools]
