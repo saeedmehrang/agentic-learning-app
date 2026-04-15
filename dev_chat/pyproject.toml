@@ -8,6 +8,12 @@ dependencies = [
     "requests>=2.31.0",
 ]
 
+[dependency-groups]
+dev = [
+    "ruff>=0.15.7",
+    "ty>=0.0.1a6",
+]
+
 [tool.uv]
 package = false
 
