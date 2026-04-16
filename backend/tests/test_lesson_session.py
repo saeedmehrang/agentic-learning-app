@@ -441,6 +441,167 @@ class TestHelpSession:
         assert result["gemini_handoff_prompt"] is not None
         assert len(result["gemini_handoff_prompt"]) > 0
 
+    def _make_help_session_with_context(
+        self,
+        mock_chat: MagicMock | None = None,
+        failed_question: dict | None = None,
+        student_wrong_answers: list[str] | None = None,
+        lesson_teach_text: str = "",
+    ) -> HelpSession:
+        with patch("lesson_session.genai.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            if mock_chat is not None:
+                mock_client.chats.create.return_value = mock_chat
+            else:
+                mock_client.chats.create.return_value = MagicMock()
+            mock_client_cls.return_value = mock_client
+            return HelpSession(
+                lesson_content=_LESSON_CONTENT,
+                failed_question=failed_question,
+                student_wrong_answers=student_wrong_answers,
+                lesson_teach_text=lesson_teach_text,
+            )
+
+    def test_handoff_prompt_contains_question_text(self) -> None:
+        """Fallback handoff prompt includes the failed question text."""
+        mock_chat = MagicMock()
+        mock_chat.send_message.return_value = _make_gemini_response({
+            "resolved": False,
+            "character_emotion_state": "helping",
+            "gemini_handoff_prompt": None,
+        })
+        failed_q = {
+            "question": "What does chmod 644 mean?",
+            "answer": "owner rw, group r, others r",
+        }
+        help_sess = self._make_help_session_with_context(
+            mock_chat=mock_chat,
+            failed_question=failed_q,
+        )
+
+        for _ in range(3):
+            result = help_sess.respond("Still confused.")
+
+        assert result["gemini_handoff_prompt"] is not None
+        assert "chmod 644" in result["gemini_handoff_prompt"]
+
+    def test_handoff_prompt_contains_correct_answer(self) -> None:
+        """Fallback handoff prompt includes the correct answer string."""
+        mock_chat = MagicMock()
+        mock_chat.send_message.return_value = _make_gemini_response({
+            "resolved": False,
+            "character_emotion_state": "helping",
+            "gemini_handoff_prompt": None,
+        })
+        failed_q = {
+            "question": "What does chmod 644 mean?",
+            "answer": "owner rw, group r, others r",
+        }
+        help_sess = self._make_help_session_with_context(
+            mock_chat=mock_chat,
+            failed_question=failed_q,
+        )
+
+        for _ in range(3):
+            result = help_sess.respond("Still confused.")
+
+        assert result["gemini_handoff_prompt"] is not None
+        assert "owner rw, group r, others r" in result["gemini_handoff_prompt"]
+
+    def test_handoff_prompt_contains_wrong_answers(self) -> None:
+        """Fallback handoff prompt includes the student's wrong answers."""
+        mock_chat = MagicMock()
+        mock_chat.send_message.return_value = _make_gemini_response({
+            "resolved": False,
+            "character_emotion_state": "helping",
+            "gemini_handoff_prompt": None,
+        })
+        help_sess = self._make_help_session_with_context(
+            mock_chat=mock_chat,
+            student_wrong_answers=["everyone can write", "root only"],
+        )
+
+        for _ in range(3):
+            result = help_sess.respond("Still confused.")
+
+        assert result["gemini_handoff_prompt"] is not None
+        assert "everyone can write" in result["gemini_handoff_prompt"]
+
+
+# ---------------------------------------------------------------------------
+# LessonSession — teach text and wrong answer tracking (PR-6)
+# ---------------------------------------------------------------------------
+
+
+class TestTeachTextAndWrongAnswers:
+    def test_lesson_session_stores_teach_text(self) -> None:
+        """After teach() completes, _teach_text is set to the returned lesson_text."""
+        mock_chat = MagicMock()
+        mock_chat.send_message.return_value = _make_gemini_response({
+            "lesson_text": "Linux is great",
+            "character_emotion_state": "teaching",
+            "key_concepts": [],
+        })
+        session = _make_session(mock_chat)
+        session.teach()
+        assert session._teach_text == "Linux is great"
+
+    def test_evaluate_answer_records_wrong_answers(self) -> None:
+        """Two wrong answers for the same question are both recorded in _wrong_answers."""
+        mock_chat = MagicMock()
+        wrong_response = _make_gemini_response({
+            "correct": False,
+            "explanation": "Not quite.",
+            "concept_score_delta": -0.1,
+            "character_emotion_state": "encouraging",
+        })
+        mock_chat.send_message.return_value = wrong_response
+        session = _make_session(mock_chat)
+
+        with patch("lesson_session.genai.Client") as mock_help_client_cls:
+            mock_help_client = MagicMock()
+            mock_help_client.chats.create.return_value = MagicMock()
+            mock_help_client_cls.return_value = mock_help_client
+
+            session.evaluate_answer("bad answer 1")
+            session.evaluate_answer("bad answer 2")
+
+        wrong_list = session._wrong_answers.get("0", [])
+        assert "bad answer 1" in wrong_list
+        assert "bad answer 2" in wrong_list
+
+    def test_evaluate_answer_passes_teach_text_to_help_session(self) -> None:
+        """After teach() and two wrong answers, help_session._lesson_teach_text matches."""
+        mock_chat = MagicMock()
+        session = _make_session(mock_chat)
+
+        # Set teach text by mocking teach()
+        mock_chat.send_message.return_value = _make_gemini_response({
+            "lesson_text": "Shells interpret commands for you",
+            "character_emotion_state": "teaching",
+            "key_concepts": [],
+        })
+        session.teach()
+
+        # Now mock wrong evaluate responses
+        mock_chat.send_message.return_value = _make_gemini_response({
+            "correct": False,
+            "explanation": "Wrong.",
+            "concept_score_delta": -0.1,
+            "character_emotion_state": "encouraging",
+        })
+
+        with patch("lesson_session.genai.Client") as mock_help_client_cls:
+            mock_help_client = MagicMock()
+            mock_help_client.chats.create.return_value = MagicMock()
+            mock_help_client_cls.return_value = mock_help_client
+
+            session.evaluate_answer("wrong 1")
+            session.evaluate_answer("wrong 2")
+
+        assert session.help_session is not None
+        assert session.help_session._lesson_teach_text == "Shells interpret commands for you"
+
 
 # ---------------------------------------------------------------------------
 # _extract_json helper
