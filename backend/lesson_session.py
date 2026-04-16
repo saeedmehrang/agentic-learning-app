@@ -20,6 +20,10 @@ Hard constraints
   Missing keys raise ValueError so failures are loud, not silently swallowed.
 - The Gemini model for LessonSession is settings.lesson_model (gemini-2.5-flash).
   The Gemini model for HelpSession is settings.help_model (gemini-2.5-flash-lite).
+- HelpSession receives full quiz-failure context at creation time: failed question,
+  correct answer, student wrong answers, and the original lesson explanation. This
+  context is used to generate a rich gemini_handoff_prompt on unresolved turn 3,
+  linking to AI Studio with the model pre-set to gemini-3-flash-preview.
 - cached_content may be None when ENABLE_LESSON_CACHE=false — handled gracefully.
 """
 from __future__ import annotations
@@ -120,16 +124,88 @@ BEHAVIOURAL RULES
 """
 
 
-def _build_help_system_prompt(lesson_content: dict[str, Any]) -> str:
+def _build_help_system_prompt(
+    lesson_content: dict[str, Any],
+    failed_question: dict[str, Any] | None = None,
+    student_wrong_answers: list[str] | None = None,
+    lesson_teach_text: str = "",
+) -> str:
     """
     Build the system prompt for HelpSession.
 
     HelpSession is a separate chat with a 3-turn cap. It receives enough lesson
     context to answer follow-up questions, but does not share chat history with
     the main LessonSession.
+
+    When quiz-failure context is provided (failed_question, student_wrong_answers,
+    lesson_teach_text), it is injected into the prompt so the tutor knows exactly
+    what the learner got wrong and can target the explanation accordingly. The
+    handoff instruction block tells the model how to build a self-contained prompt
+    for the Gemini app if the learner remains stuck on turn 3.
     """
     lesson_id = lesson_content.get("lesson_id", "unknown")
     tier = lesson_content.get("tier", "beginner")
+    failed_question = failed_question or {}
+    student_wrong_answers = student_wrong_answers or []
+
+    # Build quiz-failure context block
+    question_text = failed_question.get("question", failed_question.get("question_text", ""))
+    correct_answer = failed_question.get("answer", failed_question.get("correct_answer", ""))
+    options = failed_question.get("options", [])
+    options_text = "\n".join(f"  - {o}" for o in options) if options else ""
+    wrong_answers_text = (
+        "\n".join(f"  - {a}" for a in student_wrong_answers)
+        if student_wrong_answers
+        else "  (not recorded)"
+    )
+
+    quiz_context = f"""
+FAILED QUIZ QUESTION
+--------------------
+Question : {question_text}
+Options  :{("\n" + options_text) if options_text else " (none)"}
+Correct  : {correct_answer}
+Student's wrong answer(s):
+{wrong_answers_text}
+"""
+
+    teach_context = ""
+    if lesson_teach_text:
+        teach_context = f"""
+ORIGINAL LESSON EXPLANATION (what the student was shown)
+---------------------------------------------------------
+{lesson_teach_text[:1500]}
+"""
+
+    handoff_instruction = """
+HANDOFF PROMPT INSTRUCTIONS (for turn 3 only, if unresolved)
+-------------------------------------------------------------
+If the learner is still confused on your final turn, set "gemini_handoff_prompt" to a
+self-contained prompt structured EXACTLY as follows (fill in all placeholders):
+
+\"\"\"
+I am a beginner learning Linux. I am studying [CONCEPT NAME] from lesson [LESSON_ID].
+
+My tutor explained it like this:
+[PASTE A 2-3 SENTENCE SUMMARY OF THE ORIGINAL EXPLANATION]
+
+I got this quiz question wrong twice:
+Question: [EXACT QUESTION TEXT]
+Options: [LIST OPTIONS IF ANY]
+Correct answer: [CORRECT ANSWER]
+My wrong answer(s): [STUDENT'S WRONG ANSWERS]
+
+My tutor then tried to help me in a short session but I am still confused.
+
+Please explain this concept to me differently, using a fresh real-world analogy.
+Then ask me one simple question to check my understanding.
+\"\"\"
+
+This prompt must be usable with zero additional context — treat it as if it will be
+sent to a brand-new AI that has never seen this conversation.
+If resolved, set "gemini_handoff_prompt" to null.
+"""
+
     return f"""You are a patient tutor helping a learner who got stuck on a quiz question
 in a Linux course.
 
@@ -141,17 +217,16 @@ Difficulty: {tier}
 LESSON CONTENT (JSON)
 ---------------------
 {json.dumps(lesson_content, indent=2, ensure_ascii=False)}
-
+{teach_context}{quiz_context}
 BEHAVIOURAL RULES
 -----------------
 1. Answer the learner's question clearly, using examples from the lesson where helpful.
 2. Do NOT simply give away the quiz answer — guide the learner toward understanding.
 3. Keep responses concise (3–5 sentences). You have a maximum of 3 turns.
 4. On your final turn (turn 3), if the learner still seems confused, include a
-   "gemini_handoff_prompt" field in your JSON response — a self-contained prompt
-   the learner can paste into the Gemini app to continue learning.
+   "gemini_handoff_prompt" field in your JSON response — structured as described below.
 5. Respond ONLY in valid JSON matching the required schema.
-"""
+{handoff_instruction}"""
 
 
 # ---------------------------------------------------------------------------
@@ -173,8 +248,17 @@ class HelpSession:
 
     MAX_TURNS = 3
 
-    def __init__(self, lesson_content: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        lesson_content: dict[str, Any],
+        failed_question: dict[str, Any] | None = None,
+        student_wrong_answers: list[str] | None = None,
+        lesson_teach_text: str = "",
+    ) -> None:
         self._lesson_content = lesson_content
+        self._failed_question = failed_question or {}
+        self._student_wrong_answers = student_wrong_answers or []
+        self._lesson_teach_text = lesson_teach_text
         self._turn_count = 0
         self._resolved = False
 
@@ -182,7 +266,12 @@ class HelpSession:
         self._chat = client.chats.create(
             model=settings.help_model,
             config=genai_types.GenerateContentConfig(
-                system_instruction=_build_help_system_prompt(lesson_content),
+                system_instruction=_build_help_system_prompt(
+                    lesson_content,
+                    failed_question=self._failed_question,
+                    student_wrong_answers=self._student_wrong_answers,
+                    lesson_teach_text=self._lesson_teach_text,
+                ),
             ),
         )
 
@@ -254,10 +343,33 @@ class HelpSession:
         # On final turn, if unresolved and no handoff provided, generate a fallback
         if is_final_turn and not self._resolved and not handoff:
             lesson_id = self._lesson_content.get("lesson_id", "this lesson")
+            question_text = self._failed_question.get(
+                "question",
+                self._failed_question.get("question_text", "the quiz question"),
+            )
+            correct_answer = self._failed_question.get(
+                "answer",
+                self._failed_question.get("correct_answer", ""),
+            )
+            wrong = (
+                ", ".join(self._student_wrong_answers)
+                if self._student_wrong_answers
+                else "unknown"
+            )
+            teach_summary = self._lesson_teach_text[:300] if self._lesson_teach_text else ""
             handoff = (
-                f"I was studying Linux (lesson {lesson_id}) and got stuck. "
-                f"Can you help me understand the material? "
-                f"Here is what I know so far: {message}"
+                f"I am a beginner learning Linux. I am studying lesson {lesson_id}.\n\n"
+                + (
+                    f"My tutor explained it like this:\n{teach_summary}\n\n"
+                    if teach_summary
+                    else ""
+                )
+                + f"I got this quiz question wrong twice:\nQuestion: {question_text}\n"
+                + (f"Correct answer: {correct_answer}\n" if correct_answer else "")
+                + f"My wrong answer(s): {wrong}\n\n"
+                "My tutor tried to help me but I am still confused.\n\n"
+                "Please explain this concept to me differently using a fresh real-world"
+                " analogy, then ask me one simple question to check my understanding."
             )
             logger.info(
                 "HelpSession: generated fallback gemini_handoff_prompt (not logged for privacy)"
@@ -331,6 +443,12 @@ class LessonSession:
         # Key: concept identifier (question index as str), Value: wrong answer count
         self._consecutive_wrong: dict[str, int] = {}
 
+        # Track all wrong answer strings per concept for HelpSession context
+        self._wrong_answers: dict[str, list[str]] = {}
+
+        # Lesson text stored after teach() completes — passed to HelpSession
+        self._teach_text: str = ""
+
         # HelpSession is created on demand when trigger_help fires
         self.help_session: HelpSession | None = None
 
@@ -393,6 +511,8 @@ class LessonSession:
         _validate_keys(
             raw, {"lesson_text", "character_emotion_state", "key_concepts"}, context="teach"
         )
+
+        self._teach_text = raw["lesson_text"]
 
         return {
             "lesson_text": raw["lesson_text"],
@@ -519,11 +639,17 @@ class LessonSession:
             self._consecutive_wrong[concept_key] = (
                 self._consecutive_wrong.get(concept_key, 0) + 1
             )
+            self._wrong_answers.setdefault(concept_key, []).append(answer)
 
         # Trigger help on 2nd consecutive wrong answer for this concept
         trigger_help = not correct and self._consecutive_wrong.get(concept_key, 0) >= 2
         if trigger_help and self.help_session is None:
-            self.help_session = HelpSession(self._lesson_content)
+            self.help_session = HelpSession(
+                lesson_content=self._lesson_content,
+                failed_question=q,
+                student_wrong_answers=list(self._wrong_answers_for_question(concept_key)),
+                lesson_teach_text=self._teach_text,
+            )
             logger.info(
                 "HelpSession created for %s q%d after %d consecutive wrong answers",
                 self.lesson_id, self._question_index,
@@ -559,6 +685,10 @@ class LessonSession:
     def total_questions(self) -> int:
         """Total number of quiz questions for this lesson."""
         return len(self._questions)
+
+    def _wrong_answers_for_question(self, concept_key: str) -> list[str]:
+        """Return the list of wrong answer strings recorded for a given concept key."""
+        return self._wrong_answers.get(concept_key, [])
 
 
 # ---------------------------------------------------------------------------
