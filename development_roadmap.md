@@ -269,6 +269,134 @@ gsutil cp courses/linux-basics/concept_map.json \
 
 ---
 
+### PR-6: Gemini Handoff — Context-Rich Prompt + AI Studio Deep Link
+
+> **Goal:** Make the Gemini handoff actually useful. Today `HelpSession` generates a prompt with almost no context — it doesn't know which quiz question the student failed, what their wrong answers were, or what the help turns covered. The fallback is literally "I was studying Linux and got stuck." A student pasting that into Gemini gets a generic response. This PR fixes the root cause and delivers the handoff reliably across all platforms using a confirmed, documented URL mechanism targeting Gemini Flash (free tier).
+
+---
+
+#### Problem Statement (precise)
+
+At the moment `gemini_handoff_prompt` is generated (HelpSession turn 3), the model has:
+- The full lesson JSON (in system prompt) ✅
+- The 3 help-turn conversation (in chat history) ✅
+
+But it does **not** have:
+- The specific quiz question the student failed ❌
+- The student's wrong answer(s) ❌
+- The correct answer to the question ❌
+- What the LessonSession's `teach()` output was (the character's explanation) ❌
+
+Additionally, the original deep-link design (`gemini.google.com/app?text=`) was unvalidated and has no confirmed URL parameter support on mobile. It is replaced here with a confirmed, documented mechanism.
+
+---
+
+#### Delivery Mechanism: Google AI Studio URL (Confirmed)
+
+**Research finding:** Google AI Studio (`aistudio.google.com`) supports URL-based prompt pre-filling via an officially documented `?prompt=` query parameter, confirmed by Google DeepMind's Philipp Schmid in April 2025:
+
+```
+https://aistudio.google.com/prompts/new_chat?prompt={encoded_text}&model=gemini-2.5-flash
+```
+
+This URL:
+- **Works in any mobile browser** (no app install required, no deep-link uncertainty)
+- **Pre-fills the prompt** in a new chat — student sees the full context and can tap Run
+- **Targets Gemini 3 Flash** via the `?model=gemini-3-flash-preview` parameter — the free-tier model, no billing required for the student
+- **Requires the student to be signed into their Google account** — which is standard for AI Studio
+- **Works identically on iOS and Android** — it is a web URL, not a native app intent
+
+This eliminates the entire iOS/Android deep-link uncertainty. `url_launcher` opens it in the system browser with `LaunchMode.externalNonBrowserApplication` attempted first; if unavailable, browser is used — both work correctly.
+
+**Why not the Gemini consumer app (`gemini.google.com`)?** The consumer app has no documented URL parameter for prompt pre-filling. Extensions exist that enable it on desktop Chrome, but there is no confirmed mobile support. AI Studio is the correct surface for a context-rich technical handoff.
+
+**Why Gemini 3 Flash (free)?** The `?model=gemini-3-flash-preview` parameter ensures the student lands on the free-tier model (15 RPM, 1,000 req/day — irrelevant for one handoff per session). No credit card, no quota concern. Gemini 3 Flash is more than sufficient for tutoring continuation.
+
+---
+
+#### Design: Three Changes
+
+**1. Inject full quiz-failure context into HelpSession at creation time**
+
+When `LessonSession.evaluate_answer()` creates a `HelpSession` (on the 2nd consecutive wrong answer), it currently passes only `self._lesson_content`. It will also pass:
+
+- `failed_question: dict` — the full question dict (text, format, options)
+- `correct_answer: str` — the correct answer to the failed question (from the question dict)
+- `student_wrong_answers: list[str]` — the student's two wrong answers
+- `lesson_teach_text: str` — the character's explanation from `teach()` (stored on `self` after turn 1)
+
+`HelpSession.__init__` will receive these and inject them into the system prompt via `_build_help_system_prompt()`. No new network calls. No added latency. This is purely passing already-in-memory data.
+
+**2. Improve `_build_help_system_prompt()` to produce a structured, self-contained handoff prompt**
+
+Update the system prompt instruction for the turn-3 unresolved case to require this explicit structure in `gemini_handoff_prompt`:
+
+> "The `gemini_handoff_prompt` must be a complete, self-contained prompt a student can submit to a brand-new Gemini conversation with zero additional context. It must include:
+> (a) The Linux concept being studied (module name, lesson ID)
+> (b) The original lesson explanation that was given to the student (verbatim summary)
+> (c) The exact quiz question the student got wrong (verbatim)
+> (d) The correct answer to that question
+> (e) The student's wrong answer(s)
+> (f) A brief summary of what the 3 help turns attempted and why the student is still confused
+> (g) A direct instruction to Gemini: 'Please explain this concept differently, using a fresh analogy. Then ask me a simple question to check my understanding.'
+> Write this as if you are handing off a student to a new tutor who has seen nothing."
+
+Correct answers are included because Gemini needs to know what to reinforce, not just what went wrong. Without the correct answer in context, Gemini may spend time on incorrect explanations.
+
+**3. AI Studio URL construction and delivery in Flutter**
+
+The Flutter `GeminiReferralCard` widget constructs the AI Studio URL at tap time:
+
+```dart
+final encoded = Uri.encodeComponent(handoffPrompt);
+final url = Uri.parse(
+  'https://aistudio.google.com/prompts/new_chat'
+  '?prompt=$encoded'
+  '&model=gemini-3-flash-preview'
+);
+await launchUrl(url, mode: LaunchMode.externalApplication);
+```
+
+**Prompt length cap: 3,000 characters.** AI Studio's URL bar handles long queries without issues in modern browsers, but 3,000 chars is a practical limit that comfortably fits the full structured context (question + correct answer + wrong answers + explanation summary + instruction). Truncate at the last complete sentence before the limit, appending `"[see lesson {lesson_id} for full context]"`.
+
+**Fallback:** If `launchUrl()` fails (rare — this is a plain HTTPS URL), copy to clipboard via `Clipboard.setData()` and show a `SnackBar`: *"Prompt copied — paste it into AI Studio to continue learning."*
+
+---
+
+#### Files Changed
+
+| File | Change |
+|---|---|
+| `backend/lesson_session.py` | `LessonSession`: store `_teach_text` after `teach()`; pass `failed_question`, `correct_answer`, `student_wrong_answers`, `teach_text` to `HelpSession.__init__()` |
+| `backend/lesson_session.py` | `HelpSession.__init__`: accept new args; `_build_help_system_prompt()` injects all of them |
+| `backend/lesson_session.py` | System prompt instruction for turn-3 handoff: specify required prompt structure including correct answer (see above) |
+| `app/lib/widgets/gemini_referral_card.dart` | AI Studio URL construction with `?prompt=` + `?model=gemini-2.5-flash`; 3,000-char cap; clipboard fallback |
+| `backend/tests/test_lesson_session.py` | Tests: handoff prompt contains question text; contains correct answer; contains at least one wrong answer; fallback contains lesson ID |
+| `app/test/widgets/gemini_referral_card_test.dart` | Tests: URL contains `aistudio.google.com`; URL contains `model=gemini-2.5-flash`; fallback copies to clipboard; prompt truncated at 3,000 chars |
+
+---
+
+#### What Is Explicitly Not Done in This PR
+
+- **No increase to the 3-turn cap.** The turn limit is a pedagogical constraint. The right fix for a student who is stuck is a better handoff, not more turns in a broken context.
+- **No logging of handoff prompt content.** `gemini_handoff_used` remains a boolean in analytics only. The prompt text is never written to Firestore or Firebase Analytics.
+- **No server-side URL construction.** The backend returns `gemini_handoff_prompt` as a plain string. URL construction, encoding, and launch logic live entirely in Flutter.
+
+---
+
+#### Verification
+
+1. Unit test: trigger a help session; assert `gemini_handoff_prompt` contains the `question_text` verbatim.
+2. Unit test: assert `gemini_handoff_prompt` contains the `correct_answer` string.
+3. Unit test: assert `gemini_handoff_prompt` contains at least one of the student's wrong answers.
+4. Flutter widget test: assert constructed URL starts with `https://aistudio.google.com/prompts/new_chat`.
+5. Flutter widget test: assert URL contains `model=gemini-3-flash-preview`.
+6. Flutter widget test: pass a 4,000-character prompt; assert URL-encoded prompt is ≤ 3,000 characters with truncation suffix.
+7. Flutter widget test: mock `launchUrl` to throw; assert clipboard is populated and SnackBar appears.
+8. Manual (Android + iOS): tap referral card → browser opens AI Studio with prompt pre-filled in the new chat box, model set to Gemini 2.5 Flash.
+
+---
+
 ## Phase 4 — Integration & Load Testing
 
 > **Goal:** Full session pipeline tested end-to-end against the deployed Cloud Run service. No Flutter required.
