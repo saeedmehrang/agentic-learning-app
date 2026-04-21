@@ -740,14 +740,15 @@ def _extract_json(text: str) -> dict[str, Any]:
             lines = lines[:-1]
         text = "\n".join(lines).strip()
 
-    # Find the outermost JSON object
+    # Find the first JSON object and decode only that — stops at the first
+    # complete object even if the model emits trailing text or multiple objects.
     start = text.find("{")
-    end = text.rfind("}")
-    if start == -1 or end == -1 or end <= start:
+    if start == -1:
         raise ValueError(f"No JSON object found in Gemini response: {text[:200]!r}")
 
     try:
-        return json.loads(text[start : end + 1])
+        obj, _ = json.JSONDecoder().raw_decode(text, start)
+        return obj
     except json.JSONDecodeError as exc:
         raise ValueError(f"Failed to parse JSON from Gemini response: {exc}") from exc
 
