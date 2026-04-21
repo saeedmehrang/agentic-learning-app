@@ -416,7 +416,7 @@ await launchUrl(url, mode: LaunchMode.externalApplication);
     --set-env-vars APP_ENV=production,GCP_PROJECT_ID=agentic-learning-app-e13cb,ENABLE_LESSON_CACHE=false \
     --set-secrets GEMINI_API_KEY=GEMINI_API_KEY:latest
   ```
-- [ ] Verify health check: `curl https://<cloud-run-url>/health` → `{"status":"ok"}`
+- [x] Verify health check: `curl https://backend-1081017476491.us-central1.run.app/health` → `{"status":"ok"}` ✅ 2026-04-21
 
 ### 4.2 End-to-End Session Tests
 

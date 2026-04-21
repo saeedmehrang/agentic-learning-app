@@ -369,13 +369,19 @@ def test_fsrs_written_to_firestore(session: Session) -> None:
         if not doc.exists:
             pytest.skip("Firestore document not written — FSRS may not have run yet")
 
+        # Doc structure: { "0": {next_review_at, mastery_score, ...}, "1": {...} }
+        # Concept IDs are question indices stored as string keys inside the lesson doc.
         data = doc.to_dict() or {}
+        assert len(data) > 0, f"Firestore concept doc is empty: {data}"
 
-        next_review_at = data.get("next_review_at")
-        assert next_review_at is not None, "next_review_at must be present"
-        assert len(str(next_review_at)) > 0, "next_review_at must be non-empty"
+        # Validate the first concept entry
+        first_concept = next(iter(data.values()))
+        assert isinstance(first_concept, dict), f"Expected dict for concept, got: {type(first_concept)}"
 
-        mastery_score = data.get("mastery_score")
+        next_review_at = first_concept.get("next_review_at")
+        assert next_review_at is not None, f"next_review_at missing in concept: {first_concept}"
+
+        mastery_score = first_concept.get("mastery_score")
         assert mastery_score is not None, "mastery_score must be present"
         assert isinstance(mastery_score, float), f"mastery_score must be float, got {type(mastery_score)}"
         assert 0.0 <= mastery_score <= 1.0, f"mastery_score out of range: {mastery_score}"
