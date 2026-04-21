@@ -315,7 +315,7 @@ def _create_cache(block_idx: int, prompt: str) -> Any:
     import google.genai as genai
     from google.genai import types as genai_types
 
-    client = genai.Client(vertexai=True)
+    client = genai.Client(vertexai=True, location="global")
     cache = client.caches.create(
         model="gemini-3.1-flash-lite-preview",
         config=genai_types.CreateCachedContentConfig(
