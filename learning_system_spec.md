@@ -42,7 +42,7 @@ Cloud SQL and pgvector have been removed. There is no database for course conten
 6. **Quiz loop**: same Gemini chat session continues — LessonSession generates one question per turn, evaluates answers with full lesson context in window.
 7. If learner answers incorrectly twice → **HelpSession** activates. Max 3 turns enforced in Python. Character switches to `helping` state.
 8. After turn 3: if concept still unresolved → HelpSession outputs `gemini_handoff_prompt`. App surfaces Gemini referral card.
-9. **SummaryCall** (single Gemini Flash-Lite call, no history) writes timestamped session record and calls `run_fsrs()` to update concept mastery in Firestore.
+9. **SummaryCall** (single Gemini 3.1 Flash-Lite call, no history) writes timestamped session record and calls `run_fsrs()` to update concept mastery in Firestore.
 
 ---
 
@@ -63,9 +63,9 @@ The result: **pure-Python scheduler + 3 direct Gemini SDK calls per session**, d
 | Component | Type | Model | Responsibility |
 |---|---|---|---|
 | `scheduler.pick_next_lesson()` | Pure Python | None | Read Firestore concept schedule. Return `{lesson_id, tier, module_character_id}`. No LLM. |
-| `LessonSession` | `GenerativeModel.start_chat()` | Gemini 2.5 Flash | Deliver lesson. Run quiz loop. Track consecutive wrong answers. Emit `trigger_help`. |
-| `HelpSession` | `GenerativeModel.start_chat()` | Gemini 2.5 Flash-Lite | Short clarification dialogue, hard-capped at 3 turns in Python. On unresolved exit: output `gemini_handoff_prompt`. |
-| `SummaryCall` | Single `generate_content()` call | Gemini 2.5 Flash-Lite | Summarise session. Call `run_fsrs()`. Write Firestore session record + concept mastery. |
+| `LessonSession` | `client.chats.create()` | Gemini 3.1 Flash-Lite, thinking=LOW (1024) | Deliver lesson. Run quiz loop. Track consecutive wrong answers. Emit `trigger_help`. |
+| `HelpSession` | `client.chats.create()` | Gemini 3.1 Flash-Lite, thinking=MINIMAL (0) | Short clarification dialogue, hard-capped at 3 turns in Python. On unresolved exit: output `gemini_handoff_prompt`. |
+| `SummaryCall` | Single `generate_content()` call | Gemini 3.1 Flash-Lite, thinking=MINIMAL (0) | Summarise session. Call `run_fsrs()`. Write Firestore session record + concept mastery. |
 
 **Tools (plain async Python, no LLM):**
 
@@ -304,9 +304,9 @@ No PII in Firestore. All data keyed by anonymous Firebase UID.
 | Component | Avg Tokens | Model | Cost |
 |---|---|---|---|
 | Scheduler (Firestore read) | — | None | ~$0.00 |
-| LessonSession — teaching + quiz (multi-turn) | 1,750 in / 975 out | Gemini 2.5 Flash | ~$0.00057 |
-| HelpSession (30% of sessions, blended) | 800 in / 500 out | Gemini 2.5 Flash-Lite | ~$0.00012 blended |
-| SummaryCall + FSRS | 550 in / 320 out | Gemini 2.5 Flash-Lite | ~$0.00006 |
+| LessonSession — teaching + quiz (multi-turn) | 1,750 in / 975 out | Gemini 3.1 Flash-Lite | ~$0.00015 (est.) |
+| HelpSession (30% of sessions, blended) | 800 in / 500 out | Gemini 3.1 Flash-Lite | ~$0.00004 blended (est.) |
+| SummaryCall + FSRS | 550 in / 320 out | Gemini 3.1 Flash-Lite | ~$0.00002 (est.) |
 | **Total per session** | | | **~$0.00075** |
 
 ### Monthly Infrastructure (100 learners, 1 session/day = 3,000 sessions/month)

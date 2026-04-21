@@ -11,7 +11,7 @@
 | Phase 1 | Content Generation | ✅ |
 | Phase 2 | Character Asset Production | ☐ |
 | Phase 3 | Backend Simplification Refactor | ✅ PR-1 ✅ PR-2 ✅ PR-3 ✅ PR-4 ✅ PR-5 ✅ |
-| Phase 4 | Integration & Load Testing | ☐ |
+| Phase 4 | Integration & Load Testing | ✅ (e2e tests) ☐ (load tests) |
 | Phase 5 | Flutter App | ☐ |
 | Phase 6 | Trial Launch & Iteration | ☐ |
 
@@ -402,38 +402,39 @@ await launchUrl(url, mode: LaunchMode.externalApplication);
 > **Goal:** Full session pipeline tested end-to-end against the deployed Cloud Run service. No Flutter required.
 
 ### 4.1 Cloud Run Deployment
-- [ ] **OPERATIONAL**: Build and push backend image:
-  ```bash
-  gcloud builds submit --config infra/cloudbuild/backend.yaml .
-  ```
-- [ ] **OPERATIONAL**: Deploy to Cloud Run:
-  ```bash
-  gcloud run deploy learning-backend \
-    --image us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/backend:latest \
-    --region us-central1 --platform managed --allow-unauthenticated \
-    --min-instances 0 \
-    --service-account cloud-run-app-identity@agentic-learning-app-e13cb.iam.gserviceaccount.com \
-    --set-env-vars APP_ENV=production,GCP_PROJECT_ID=agentic-learning-app-e13cb,ENABLE_LESSON_CACHE=false \
-    --set-secrets GEMINI_API_KEY=GEMINI_API_KEY:latest
-  ```
+- [x] **OPERATIONAL**: Build and push backend image ✅ 2026-04-21
+- [x] **OPERATIONAL**: Deploy to Cloud Run — service name `backend`, revision `backend-00007-skv` ✅ 2026-04-21
+  - Service URL: `https://backend-1081017476491.us-central1.run.app`
+  - Auth: ADC via service account `cloud-run-app-identity@...` — no API key
+  - Model: `gemini-3.1-flash-lite-preview` with `location="global"` (all chat components)
+  - See `notes/phase4-deployment-instructions.md` for full deploy commands
 - [x] Verify health check: `curl https://backend-1081017476491.us-central1.run.app/health` → `{"status":"ok"}` ✅ 2026-04-21
 
-### 4.2 End-to-End Session Tests
+### 4.2 End-to-End Session Tests ✅ 2026-04-21 — 6/6 passing
 
-> These are backend integration tests hitting the deployed Cloud Run service with real Firestore and Gemini calls. Add them to `backend/tests/integration/` in PR-5. They require `CLOUD_RUN_URL` and ADC credentials — do not run locally without real GCP context.
+- [x] `test_health_check` — GET /health → 200 `{"status":"ok"}`
+- [x] `test_happy_path_no_help` — full session, no help triggered; `gemini_handoff_used=False` in summary; FSRS written to Firestore
+- [x] `test_help_path_triggered` — 2 wrong answers → `trigger_help=True` → help turn responds; `resolved` bool present
+- [x] `test_help_unresolved_handoff` — 3 unresolved turns → `gemini_handoff_prompt` non-empty, ≤3000 chars; `gemini_handoff_used=True` in summary ← PR-6 key test
+- [x] `test_help_turn_cap_enforced` — 4th help call → 409
+- [x] `test_fsrs_written_to_firestore` — `learners/{uid}/concepts/L01` written with `next_review_at` and `mastery_score` in [0,1]
 
-- [ ] Write `backend/tests/integration/test_session_e2e.py`:
-  - Happy path: `start → lesson → quiz question → quiz answer (correct) → complete`; verify Firestore `next_review_at` is a future timestamp
-  - Help path (resolved): 2 wrong answers → `trigger_help=True` → help turn 1–2 → `resolved=True` → quiz resumes
-  - Help path (unresolved): 3 help turns → `resolved=False`, `gemini_handoff_prompt` non-empty, `gemini_handoff_used=True` in summary
-  - New learner: `POST /session/start` for unknown UID → creates Firestore profile, returns `lesson_id=L01`
-  - FSRS write: after `complete`, `learners/{uid}/concepts/{lesson_id}.next_review_at` is a valid future ISO 8601 timestamp
-- [ ] Run integration tests against deployed Cloud Run:
-  ```bash
-  CLOUD_RUN_URL=https://<service-url> python -m pytest backend/tests/integration/ -v
-  ```
+Run:
+```bash
+CLOUD_RUN_URL=https://backend-1081017476491.us-central1.run.app \
+  python -m pytest backend/tests/integration/test_session_e2e.py -v
+```
 
-### 4.3 Load Test
+### 4.3 Model Upgrade ✅ 2026-04-21
+
+All chat components upgraded from Gemini 2.5 Flash / 2.5 Flash-Lite to **`gemini-3.1-flash-lite-preview`**:
+- `location="global"` required (preview model only available via global Vertex AI endpoint)
+- LessonSession: `thinking_budget=1024` (LOW)
+- HelpSession: `thinking_budget=0` (MINIMAL)
+- SummaryCall: `thinking_budget=0` (MINIMAL)
+- Integration tests re-run and passing after upgrade (80s vs 107s — faster)
+
+### 4.4 Load Test
 - [ ] Simulate 10 concurrent sessions against Cloud Run
 - [ ] Measure cold start latency (target: `POST /session/start` < 100 ms excluding Gemini generation)
 - [ ] Confirm scale-to-zero: after 15 minutes idle, `gcloud run services describe` shows 0 instances
