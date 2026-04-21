@@ -189,7 +189,8 @@ def test_help_path_triggered(session: Session) -> None:
         assert r.status_code == 200, r.text
         time.sleep(2)
 
-        session.get_lesson()
+        r = session.get_lesson()
+        assert r.status_code == 200, r.text
 
         r = session.get_question()
         assert r.status_code == 200, r.text
@@ -233,8 +234,10 @@ def test_help_unresolved_handoff(session: Session) -> None:
         assert r.status_code == 200, r.text
         time.sleep(2)
 
-        session.get_lesson()
-        session.get_question()
+        r = session.get_lesson()
+        assert r.status_code == 200, r.text
+        r = session.get_question()
+        assert r.status_code == 200, r.text
 
         # Trigger help with two wrong answers
         trigger_help = False
@@ -294,8 +297,10 @@ def test_help_turn_cap_enforced(session: Session) -> None:
         assert r.status_code == 200, r.text
         time.sleep(2)
 
-        session.get_lesson()
-        session.get_question()
+        r = session.get_lesson()
+        assert r.status_code == 200, r.text
+        r = session.get_question()
+        assert r.status_code == 200, r.text
 
         # Trigger help
         trigger_help = False
@@ -348,7 +353,8 @@ def test_fsrs_written_to_firestore(session: Session) -> None:
         assert r.status_code == 200, r.text
         time.sleep(2)
 
-        session.get_lesson()
+        r = session.get_lesson()
+        assert r.status_code == 200, r.text
 
         r = session.get_question()
         assert r.status_code == 200, r.text
