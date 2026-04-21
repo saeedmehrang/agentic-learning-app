@@ -262,7 +262,7 @@ class HelpSession:
         self._turn_count = 0
         self._resolved = False
 
-        client = genai.Client()
+        client = genai.Client(vertexai=True)
         self._chat = client.chats.create(
             model=settings.help_model,
             config=genai_types.GenerateContentConfig(
@@ -458,7 +458,7 @@ class LessonSession:
         # Initialise Gemini chat — with or without cached prefix.
         # GenerateContentConfig.cached_content expects a cache name string (e.g.
         # "projects/.../cachedContents/..."), not the full CachedContent object.
-        client = genai.Client()
+        client = genai.Client(vertexai=True)
         cache_name: str | None = cached_content.name if cached_content is not None else None
         config = genai_types.GenerateContentConfig(
             system_instruction=system_prompt,

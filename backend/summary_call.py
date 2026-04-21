@@ -162,7 +162,7 @@ def run_summary(session_data: dict[str, Any]) -> dict[str, Any]:
     # ------------------------------------------------------------------
     # 1. Single-shot Gemini summary call
     # ------------------------------------------------------------------
-    client = genai.Client()
+    client = genai.Client(vertexai=True)
     prompt = _build_summary_prompt(session_data)
 
     try:
