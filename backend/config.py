@@ -48,9 +48,9 @@ class Settings(BaseSettings):
     app_version: str = "dev"
 
     # Model assignments (fixed per spec — do not change without updating spec)
-    lesson_model: str = "gemini-2.5-flash"
-    help_model: str = "gemini-2.5-flash-lite"
-    summary_model: str = "gemini-2.5-flash-lite"
+    lesson_model: str = "gemini-3.1-flash-lite-preview"
+    help_model: str = "gemini-3.1-flash-lite-preview"
+    summary_model: str = "gemini-3.1-flash-lite-preview"
 
     @classmethod
     def settings_customise_sources(

@@ -317,7 +317,7 @@ def _create_cache(block_idx: int, prompt: str) -> Any:
 
     client = genai.Client(vertexai=True)
     cache = client.caches.create(
-        model="gemini-2.5-flash",
+        model="gemini-3.1-flash-lite-preview",
         config=genai_types.CreateCachedContentConfig(
             contents=[prompt],
             ttl=f"{_CACHE_TTL_SECONDS}s",

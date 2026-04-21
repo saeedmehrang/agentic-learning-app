@@ -18,8 +18,9 @@ Hard constraints
   The counter resets to 0 on any correct answer for that concept.
 - All Gemini responses are validated for required keys before being returned.
   Missing keys raise ValueError so failures are loud, not silently swallowed.
-- The Gemini model for LessonSession is settings.lesson_model (gemini-2.5-flash).
-  The Gemini model for HelpSession is settings.help_model (gemini-2.5-flash-lite).
+- The Gemini model for LessonSession is settings.lesson_model (gemini-3.1-flash-lite-preview),
+  thinking_level=LOW. HelpSession uses settings.help_model (gemini-3.1-flash-lite-preview),
+  thinking_level=MINIMAL.
 - HelpSession receives full quiz-failure context at creation time: failed question,
   correct answer, student wrong answers, and the original lesson explanation. This
   context is used to generate a rich gemini_handoff_prompt on unresolved turn 3,
@@ -272,6 +273,7 @@ class HelpSession:
                     student_wrong_answers=self._student_wrong_answers,
                     lesson_teach_text=self._lesson_teach_text,
                 ),
+                thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
             ),
         )
 
@@ -463,6 +465,7 @@ class LessonSession:
         config = genai_types.GenerateContentConfig(
             system_instruction=system_prompt,
             cached_content=cache_name,
+            thinking_config=genai_types.ThinkingConfig(thinking_budget=1024),
         )
         self._chat = self._client.chats.create(
             model=settings.lesson_model,

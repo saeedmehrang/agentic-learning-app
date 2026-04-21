@@ -171,6 +171,7 @@ def run_summary(session_data: dict[str, Any]) -> dict[str, Any]:
             contents=prompt,
             config=genai_types.GenerateContentConfig(
                 temperature=0.4,
+                thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
             ),
         )
         raw = _extract_json(_require_text(response, "run_summary"))

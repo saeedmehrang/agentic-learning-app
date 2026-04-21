@@ -8,7 +8,7 @@ Self-paced agentic learning platform. MVP: Linux basics course (9 modules, 29 le
 - **Backend**: Google ADK agents on Cloud Run (Python 3.11+)
 - **Databases**: Cloud SQL (PostgreSQL + pgvector), Firestore
 - **Auth & Analytics**: Firebase Auth (anonymous → Google Sign-In upgrade), Firebase Analytics, Crashlytics
-- **AI Models**: Gemini 2.5 Flash (ContextAgent, LessonAgent), Gemini 2.5 Flash-Lite (HelpAgent, SummaryAgent)
+- **AI Models**: Gemini 3.1 Flash-Lite (`gemini-3.1-flash-lite-preview`) for all chat agents (LessonAgent, HelpAgent, SummaryAgent)
 - **Spaced Repetition**: FSRS algorithm
 - **Infra**: GCP-native, scale-to-zero Cloud Run
 
@@ -48,10 +48,10 @@ Use `.claude/agents/` sub-agents for any focused work in their domain:
 ContextAgent → LessonAgent → HelpAgent → SummaryAgent
 ```
 
-- **ContextAgent**: Retrieves user memory (Firestore) + calls `search_knowledge_base` tool (pgvector RAG). Model: Gemini 2.5 Flash.
-- **LessonAgent**: Delivers lessons AND handles quizzing (single context window); calls difficulty tiers (Beginner / Intermediate / Advanced). Model: Gemini 2.5 Flash.
-- **HelpAgent**: Answers follow-up questions; 3-turn limit, then hands off to Gemini app via `gemini_handoff_prompt`. Model: Gemini 2.5 Flash-Lite.
-- **SummaryAgent**: Evaluates session, calls `run_fsrs` tool to update spaced repetition schedule. Model: Gemini 2.5 Flash-Lite.
+- **ContextAgent**: Retrieves user memory (Firestore) + calls `search_knowledge_base` tool (pgvector RAG). Model: Gemini 3.1 Flash-Lite.
+- **LessonAgent**: Delivers lessons AND handles quizzing (single context window); calls difficulty tiers (Beginner / Intermediate / Advanced). Model: Gemini 3.1 Flash-Lite, thinking_level=LOW (budget=1024).
+- **HelpAgent**: Answers follow-up questions; 3-turn limit, then hands off to Gemini app via `gemini_handoff_prompt`. Model: Gemini 3.1 Flash-Lite, thinking_level=MINIMAL (budget=0).
+- **SummaryAgent**: Evaluates session, calls `run_fsrs` tool to update spaced repetition schedule. Model: Gemini 3.1 Flash-Lite, thinking_level=MINIMAL (budget=0).
 
 Agents are `LlmAgent` classes from Google ADK. Python tools (not agents) handle RAG (`search_knowledge_base`) and FSRS (`run_fsrs`).
 
@@ -65,7 +65,7 @@ Agents are `LlmAgent` classes from Google ADK. Python tools (not agents) handle 
 6. **Anonymous-first auth.** Never block content behind sign-in. Google Sign-In offered after session 3 only.
 7. **Privacy.** Never log `gemini_handoff_prompt` content in analytics. Track `gemini_handoff_used` as boolean only. Never store user PII in Cloud SQL — user data lives in Firestore keyed by anonymous Firebase UID.
 8. **Do NOT add new agents** without being explicitly asked. The 4-agent pipeline is intentional. Prefer tools (plain async Python functions) over agents for any task that doesn't need its own LLM call.
-9. **Model assignment is fixed.** Do not swap Gemini models across agents without asking.
+9. **Model assignment is fixed.** All chat agents use `gemini-3.1-flash-lite-preview`. Do not swap models without asking. Thinking budgets: LessonAgent=1024 (LOW), HelpAgent=0 (MINIMAL), SummaryAgent=0 (MINIMAL).
 
 ## Essential Commands
 
