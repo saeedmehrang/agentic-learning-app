@@ -103,6 +103,7 @@ def _patch_external_io(monkeypatch: pytest.MonkeyPatch) -> Any:
     with (
         patch("main._read_learner_concepts", return_value=[]),
         patch("main.LessonSession", mock_lesson_session_cls),
+        patch("main.check_rate_limit"),  # bypass rate limiter in unit tests
         patch("summary_call.genai.Client") as mock_summary_genai,
         patch("summary_call.firestore.Client"),
     ):

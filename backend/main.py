@@ -35,6 +35,7 @@ from pydantic import BaseModel
 from config import settings
 from lesson_session import LessonSession
 from logging_config import configure_logging
+from rate_limiter import RateLimitExceeded, check_rate_limit
 
 os.environ.setdefault("GOOGLE_CLOUD_PROJECT", settings.gcp_project_id)
 os.environ.setdefault("GOOGLE_CLOUD_LOCATION", settings.gcp_location)
@@ -261,6 +262,16 @@ async def session_start(request: SessionStartRequest) -> SessionStartResponse:
         try:
             import cache_manager as _cache_manager
             import scheduler as _scheduler
+
+            # 0. Rate limit — max N session starts per UID per rolling hour
+            try:
+                check_rate_limit(request.uid)
+            except RateLimitExceeded as exc:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Rate limit exceeded — too many session starts",
+                    headers={"Retry-After": str(exc.retry_after_seconds)},
+                )
 
             # 1. Firestore read — learner concepts
             concepts = _read_learner_concepts(request.uid)

@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     # Defaults to "dev" for local runs. Used to group metrics by deployment in Cloud Monitoring.
     app_version: str = "dev"
 
+    # Rate limiting — session starts per UID per rolling 60-minute window.
+    # Override with MAX_SESSIONS_PER_HOUR env var at deploy time.
+    max_sessions_per_hour: int = 10
+
     # Model assignments (fixed per spec — do not change without updating spec)
     lesson_model: str = "gemini-3.1-flash-lite-preview"
     help_model: str = "gemini-3.1-flash-lite-preview"

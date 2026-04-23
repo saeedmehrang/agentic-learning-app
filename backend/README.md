@@ -1,46 +1,45 @@
-# Backend — Google ADK Agent Service
+# Backend — Agentic Learning Service
 
-FastAPI service hosting the 4-agent learning pipeline. Runs on Cloud Run (scale-to-zero) and locally via `uvicorn` for development and testing.
+FastAPI service running the lesson session pipeline. Deployed on Cloud Run (scale-to-zero). No ADK, no Cloud SQL, no pgvector — direct Gemini SDK only.
 
 ## Architecture
 
 ```
-POST /session/start       → ContextAgent   (isolated session)
-GET  /session/{id}/lesson → LessonAgent    (shared session with HelpAgent)
-GET  /session/{id}/quiz/question
-POST /session/{id}/quiz/answer → LessonAgent
-POST /session/{id}/help   → HelpAgent      (max 3 turns, shared session with LessonAgent)
-POST /session/{id}/complete → SummaryAgent (isolated session)
+POST /session/start       → rate_limiter.check_rate_limit()
+                          → scheduler.pick_next_lesson()     (pure Python, reads Firestore)
+                          → LessonSession.__init__()          (stateful Gemini chat)
+
+GET  /session/{id}/lesson         → LessonSession.teach()
+GET  /session/{id}/quiz/question  → LessonSession.next_question()
+POST /session/{id}/quiz/answer    → LessonSession.evaluate_answer()
+POST /session/{id}/help           → HelpSession.respond()    (max 3 turns, hard-capped)
+POST /session/{id}/complete       → summary_call.run_summary() + run_fsrs() + Firestore write
 ```
 
-### Agents
+### Components
 
-| Agent | Model | Role |
-|---|---|---|
-| `ContextAgent` | Gemini 2.5 Flash | Reads Firestore learner memory + RAG search; picks next concept and difficulty tier |
-| `LessonAgent` | Gemini 2.5 Flash | Delivers lesson, generates quiz questions, evaluates answers |
-| `HelpAgent` | Gemini 2.5 Flash-Lite | Answers follow-up questions; 3-turn hard cap; produces `gemini_handoff_prompt` on unresolved exit |
-| `SummaryAgent` | Gemini 2.5 Flash-Lite | Writes session record to Firestore; calls `run_fsrs` to update spaced-repetition schedule |
+| Module | Type | Model | Role |
+|---|---|---|---|
+| `scheduler.py` | Pure Python | None | Read Firestore FSRS schedule; pick next lesson + tier |
+| `lesson_session.py` — `LessonSession` | `client.chats.create()` | Gemini 3.1 Flash-Lite, thinking=LOW (1024) | Deliver lesson; run quiz loop; emit `trigger_help` on 2nd consecutive wrong answer |
+| `lesson_session.py` — `HelpSession` | `client.chats.create()` | Gemini 3.1 Flash-Lite, thinking=MINIMAL (0) | 3-turn clarification; outputs `gemini_handoff_prompt` on unresolved exit |
+| `summary_call.py` | `generate_content()` | Gemini 3.1 Flash-Lite, thinking=MINIMAL (0) | Summarise session; call `run_fsrs()`; write Firestore |
+| `rate_limiter.py` | Pure Python | None | Per-UID session-start rate limit (10/hour) via Firestore transaction |
+| `run_fsrs.py` | Pure Python | None | FSRS-4 spaced-repetition algorithm — deterministic, no LLM |
+| `cache_manager.py` | Pure Python | None | Gemini context cache builder (disabled by default) |
 
-### Tools (plain async Python, no LLM)
-
-| Tool | Purpose |
-|---|---|
-| `search_knowledge_base` | pgvector RAG search over lesson content (Cloud SQL) |
-| `run_fsrs` | Pure-Python FSRS spaced-repetition scheduler; updates Firestore |
-| `get_course_structure` | Returns course/module/lesson hierarchy from Cloud SQL |
+All `genai.Client` calls use `genai.Client(vertexai=True, location="global")` — required for `gemini-3.1-flash-lite-preview` which is only available via the global Vertex AI endpoint.
 
 ## Local Development
 
 ### Prerequisites
 
 - Python 3.13, `uv` installed
-- `gcloud` authenticated + ADC configured:
+- `gcloud` authenticated with ADC:
   ```bash
   gcloud auth application-default login
   gcloud auth application-default set-quota-project agentic-learning-app-e13cb
   ```
-- Cloud SQL Auth Proxy running (see [dev_chat/README.md](../dev_chat/README.md))
 
 ### Install dependencies
 
@@ -60,82 +59,86 @@ Health check: `curl http://localhost:8080/health`
 ### Run tests
 
 ```bash
-uv run pytest
+# Unit tests (no network, no GCP)
+uv run pytest --ignore=tests/integration
+
+# Integration tests (requires live Cloud Run + ADC)
+CLOUD_RUN_URL=https://backend-1081017476491.us-central1.run.app \
+  uv run pytest tests/integration/test_session_e2e.py -v
+
+# Load tests (concurrent + response time baseline)
+CLOUD_RUN_URL=https://backend-1081017476491.us-central1.run.app \
+  uv run pytest tests/integration/test_load.py -v
 ```
 
-### Lint + type check
+### Lint
 
 ```bash
 uv run ruff check .
-uv run mypy .
 ```
 
 ## Configuration
 
-Settings are read from `.env` at the repo root (via `pydantic-settings`) and from Secret Manager at runtime. See [config.py](config.py) for all fields.
+Settings are loaded from `.env` at the repo root and from Secret Manager at runtime. See [config.py](config.py) for all fields.
 
 Key env vars:
 
 | Variable | Default | Description |
 |---|---|---|
 | `GCP_PROJECT_ID` | `agentic-learning-app-e13cb` | GCP project |
-| `GCP_LOCATION` | `us-central1` | Vertex AI region |
+| `GCP_LOCATION` | `us-central1` | Cloud Run region |
+| `GCS_PIPELINE_BUCKET` | _(empty)_ | GCS bucket for approved lesson JSON files; empty = local filesystem (dev/tests) |
 | `APP_ENV` | `development` | Environment label in logs |
-| `APP_VERSION` | `dev` | Deployment version tag — set to `$(git rev-parse --short HEAD)` at deploy time |
-| `DB_HOST` | `127.0.0.1` | Cloud SQL host (proxy) |
-| `DB_PASSWORD` | _(Secret Manager)_ | Injected at runtime |
+| `APP_VERSION` | `dev` | Deployment version — set to `$(git rev-parse --short HEAD)` at deploy time |
+| `ENABLE_LESSON_CACHE` | `false` | Set to `true` to enable Gemini context caching |
+| `MAX_SESSIONS_PER_HOUR` | `10` | Per-UID session-start rate limit |
+
+## Rate Limiting
+
+`POST /session/start` enforces a per-UID limit of `MAX_SESSIONS_PER_HOUR` (default 10) session starts per rolling 60-minute window. Implemented via a Firestore transaction in `rate_limiter.py`. Returns HTTP 429 with a `Retry-After` header when exceeded.
+
+Note: the `uid` field is currently self-reported (no Firebase token verification). Firebase ID token verification is planned for Phase 6.5 before public launch.
+
+## Firestore Schema
+
+```
+learners/{uid}
+  difficulty_tier, onboarding_complete
+
+learners/{uid}/concepts/{lesson_id}
+  { "0": {mastery_score, fsrs_stability, fsrs_difficulty, next_review_at, last_review_at}, … }
+
+learners/{uid}/sessions/{session_id}
+  lesson_id, tier_used, quiz_scores, time_on_task_seconds,
+  help_triggered, gemini_handoff_used,
+  summary_text, created_at, fsrs_result
+
+rate_limits/{uid}
+  count, window_start   ← rate limiter rolling window
+```
 
 ## Observability
 
-The backend is instrumented with OpenTelemetry (Cloud Trace) and structured JSON logging.
+Instrumented with OpenTelemetry (Cloud Trace) and structured JSON logging.
 
-### Cloud Trace
+Every HTTP request produces a trace. View traces in the [Cloud Trace console](https://console.cloud.google.com/traces/list?project=agentic-learning-app-e13cb).
 
-Every HTTP request produces a trace with child spans:
-- `agent_turn.context_agent` / `lesson_agent` / `help_agent` / `summary_agent` — total time per agent call
-- `call_llm` — Gemini API latency (emitted automatically by ADK)
-- `execute_tool` — tool execution time (emitted automatically by ADK)
-
-View traces: [Cloud Trace console](https://console.cloud.google.com/traces/list?project=agentic-learning-app-e13cb)
-
-Traces are exported even from local `uvicorn` runs (requires ADC with `roles/cloudtrace.agent`).
-
-### Structured logs
-
-Every agent turn emits an `agent_turn_complete` log entry with:
-
-```json
-{
-  "message": "agent_turn_complete",
-  "agent": "lesson_agent",
-  "latency_ms": 1843,
-  "app_version": "a1b2c3d"
-}
-```
-
-Filter in Cloud Logging: `jsonPayload.message="agent_turn_complete"`
-
-### APP_VERSION and before/after comparison
-
-`APP_VERSION` is injected at deploy time as the merge commit SHA:
-
-```bash
-gcloud run deploy backend --set-env-vars APP_VERSION=$(git rev-parse --short HEAD) ...
-```
-
-This tags all spans and log entries from a given Cloud Run revision with the version, enabling side-by-side latency comparison across deployments in the Cloud Monitoring dashboard. See `infra/monitoring/` for dashboard setup.
+`APP_VERSION` is injected at deploy time as the commit SHA, tagging all spans and log entries for side-by-side latency comparison across deployments. See `infra/monitoring/` for the Cloud Monitoring dashboard.
 
 ## Cloud Run Deploy
 
 ```bash
-# Build image
-gcloud builds submit --config infra/cloudbuild/backend.yaml .
+# Build and push image
+gcloud builds submit --config infra/cloudbuild/backend.yaml \
+  --substitutions=COMMIT_SHA=$(git rev-parse --short HEAD) .
 
-# Deploy with version tag
-APP_VERSION=$(git rev-parse --short HEAD)
+# Deploy
 gcloud run deploy backend \
-  --image us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/backend:$APP_VERSION \
-  --region us-central1 \
+  --image us-central1-docker.pkg.dev/agentic-learning-app-e13cb/agentic-learning/backend:latest \
+  --region us-central1 --platform managed --allow-unauthenticated \
+  --min-instances 0 \
   --service-account cloud-run-app-identity@agentic-learning-app-e13cb.iam.gserviceaccount.com \
-  --set-env-vars APP_VERSION=$APP_VERSION
+  --set-env-vars APP_ENV=production,GCP_PROJECT_ID=agentic-learning-app-e13cb,GCP_LOCATION=us-central1,GCS_PIPELINE_BUCKET=agentic-learning-pipeline,ENABLE_LESSON_CACHE=false,APP_VERSION=$(git rev-parse --short HEAD)
 ```
+
+Full deploy reference: `notes/phase4-deployment-instructions.md`

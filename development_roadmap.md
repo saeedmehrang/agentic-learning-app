@@ -536,12 +536,13 @@ flutter test             # all widget tests pass
 - [ ] Regenerate and re-approve flagged lessons; backend picks up new files on next Cloud Run deployment
 
 ### 6.5 **Security: Firebase ID Token Verification (before public launch)**
-> **The backend is currently `--allow-unauthenticated` at the Cloud Run IAM layer with no app-level token verification. Any bot or actor with the URL can call `/session/start` and burn Gemini/GCP budget.**
+> **The backend is `--allow-unauthenticated` at the Cloud Run IAM layer. Public access was paused 2026-04-23 by removing the `allUsers` invoker binding. Re-enable only after token verification middleware is in place.**
+- [x] **Add per-UID rate limiting** — max 10 session starts per hour per UID, enforced via Firestore transaction in `backend/rate_limiter.py` ✅ 2026-04-23
 - [ ] **Add Firebase Admin SDK token verification middleware to FastAPI** — reject requests missing a valid `Authorization: Bearer <firebase-id-token>` header with 401
 - [ ] **Flutter: attach Firebase ID token to every backend request** — call `user.getIdToken()` and inject as `Authorization` header in the HTTP client
-- [ ] **Add per-UID rate limiting** — e.g. max 10 session starts per hour per UID using Firestore counters or a simple in-memory cache
 - [ ] Re-run integration tests with token auth enabled — update test fixtures to mint a Firebase test token
 - [ ] Verify anonymous Firebase users are accepted (token verification works for anonymous auth, not just signed-in users)
+- [ ] Re-enable `allUsers` invoker binding once middleware is in place
 
 ### 6.6 Pre-Scale Preparation (at ~100 learners)
 - [ ] Enable `ENABLE_LESSON_CACHE=true` on Cloud Run
