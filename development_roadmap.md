@@ -408,6 +408,7 @@ await launchUrl(url, mode: LaunchMode.externalApplication);
   - Auth: ADC via service account `cloud-run-app-identity@...` — no API key
   - Model: `gemini-3.1-flash-lite-preview` with `location="global"` (all chat components)
   - See `notes/phase4-deployment-instructions.md` for full deploy commands
+  - **⚠ Public access paused 2026-04-23**: `allUsers` invoker binding removed pending Firebase ID token verification work (Phase 6.5). All unauthenticated requests return 403. Re-enable with `gcloud run services add-iam-policy-binding` — see `notes/phase4-deployment-instructions.md` → "Pausing and Resuming Public Access". While blocked, invoke via `curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" <url>` after `gcloud auth login`.
 - [x] Verify health check: `curl https://backend-1081017476491.us-central1.run.app/health` → `{"status":"ok"}` ✅ 2026-04-21
 
 ### 4.2 End-to-End Session Tests ✅ 2026-04-21 — 6/6 passing
