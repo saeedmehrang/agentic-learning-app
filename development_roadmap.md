@@ -11,7 +11,7 @@
 | Phase 1 | Content Generation | ✅ |
 | Phase 2 | Character Asset Production | ☐ |
 | Phase 3 | Backend Simplification Refactor | ✅ PR-1 ✅ PR-2 ✅ PR-3 ✅ PR-4 ✅ PR-5 ✅ |
-| Phase 4 | Integration & Load Testing | ✅ (e2e tests) ☐ (load tests) |
+| Phase 4 | Integration & Load Testing | ✅ |
 | Phase 5 | Flutter App | ☐ |
 | Phase 6 | Trial Launch & Iteration | ☐ |
 
@@ -434,10 +434,10 @@ All chat components upgraded from Gemini 2.5 Flash / 2.5 Flash-Lite to **`gemini
 - SummaryCall: `thinking_budget=0` (MINIMAL)
 - Integration tests re-run and passing after upgrade (80s vs 107s — faster)
 
-### 4.4 Load Test
-- [ ] Simulate 10 concurrent sessions against Cloud Run
-- [ ] Measure cold start latency (target: `POST /session/start` < 100 ms excluding Gemini generation)
-- [ ] Confirm scale-to-zero: after 15 minutes idle, `gcloud run services describe` shows 0 instances
+### 4.4 Load Test ✅ 2026-04-23
+- [x] Simulate 10 concurrent sessions against Cloud Run — all 200, unique session_ids, < 30s wall-clock (`test_concurrent_session_starts`)
+- [x] Response time baseline: single warm `POST /session/start` < 3000ms (`test_response_time_baseline`)
+- [ ] Confirm scale-to-zero: after 15 minutes idle, `gcloud run services describe` shows 0 instances (run `check_scale_to_zero.sh` after load test)
 
 ### 4.4 Enable and Test Cache (Optional)
 - [ ] `gcloud run services update learning-backend --update-env-vars ENABLE_LESSON_CACHE=true`
@@ -534,7 +534,15 @@ flutter test             # all widget tests pass
 - [ ] Flag lessons with high `gemini_handoff_used` rate (explanation quality issue)
 - [ ] Regenerate and re-approve flagged lessons; backend picks up new files on next Cloud Run deployment
 
-### 6.5 Pre-Scale Preparation (at ~100 learners)
+### 6.5 **Security: Firebase ID Token Verification (before public launch)**
+> **The backend is currently `--allow-unauthenticated` at the Cloud Run IAM layer with no app-level token verification. Any bot or actor with the URL can call `/session/start` and burn Gemini/GCP budget.**
+- [ ] **Add Firebase Admin SDK token verification middleware to FastAPI** — reject requests missing a valid `Authorization: Bearer <firebase-id-token>` header with 401
+- [ ] **Flutter: attach Firebase ID token to every backend request** — call `user.getIdToken()` and inject as `Authorization` header in the HTTP client
+- [ ] **Add per-UID rate limiting** — e.g. max 10 session starts per hour per UID using Firestore counters or a simple in-memory cache
+- [ ] Re-run integration tests with token auth enabled — update test fixtures to mint a Firebase test token
+- [ ] Verify anonymous Firebase users are accepted (token verification works for anonymous auth, not just signed-in users)
+
+### 6.6 Pre-Scale Preparation (at ~100 learners)
 - [ ] Enable `ENABLE_LESSON_CACHE=true` on Cloud Run
 - [ ] Add BigQuery streaming export from Firestore for deeper analytics
 - [ ] Add push notifications if Day-7 return rate shows significant drop-off
