@@ -39,6 +39,8 @@ venv/
 *.egg-info/
 dist/
 .pytest_cache/
+.coverage
+htmlcov/
 
 # Generated content / embeddings (runtime pipeline dirs — gitignored, created at runtime)
 courses/*/pipeline/

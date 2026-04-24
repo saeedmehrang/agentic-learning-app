@@ -13,6 +13,7 @@ Session lifecycle (per-turn interactive API)
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -265,7 +266,7 @@ async def session_start(request: SessionStartRequest) -> SessionStartResponse:
 
             # 0. Rate limit — max N session starts per UID per rolling hour
             try:
-                check_rate_limit(request.uid)
+                await asyncio.to_thread(check_rate_limit, request.uid)
             except RateLimitExceeded as exc:
                 raise HTTPException(
                     status_code=429,
