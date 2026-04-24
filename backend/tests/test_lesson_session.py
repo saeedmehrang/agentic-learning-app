@@ -635,3 +635,243 @@ class TestExtractJson:
     def test_raises_on_invalid_json(self) -> None:
         with pytest.raises(ValueError):
             ls._extract_json("{invalid json}")
+
+
+# ---------------------------------------------------------------------------
+# HelpSession — resolved property and exception path (lines 286, 331-336)
+# ---------------------------------------------------------------------------
+
+
+class TestHelpSessionEdgeCases:
+    def _make_help_session(self, mock_chat: MagicMock | None = None) -> HelpSession:
+        with patch("lesson_session.genai.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            if mock_chat is not None:
+                mock_client.chats.create.return_value = mock_chat
+            else:
+                mock_client.chats.create.return_value = MagicMock()
+            mock_client_cls.return_value = mock_client
+            return HelpSession(lesson_content=_LESSON_CONTENT)
+
+    def test_resolved_property_false_before_any_turn(self) -> None:
+        """resolved property (line 286) must return False before any respond() call."""
+        help_sess = self._make_help_session()
+        assert help_sess.resolved is False
+
+    def test_resolved_property_true_after_resolved_turn(self) -> None:
+        """resolved property returns True after respond() sets _resolved=True."""
+        mock_chat = MagicMock()
+        mock_chat.send_message.return_value = _make_gemini_response({
+            "resolved": True,
+            "character_emotion_state": "celebrating",
+        })
+        help_sess = self._make_help_session(mock_chat)
+        help_sess.respond("Got it, thanks!")
+        assert help_sess.resolved is True
+
+    def test_respond_re_raises_on_gemini_exception(self) -> None:
+        """Lines 331-336: exception from send_message must propagate after logging."""
+        mock_chat = MagicMock()
+        mock_chat.send_message.side_effect = RuntimeError("Gemini exploded")
+        help_sess = self._make_help_session(mock_chat)
+        with pytest.raises(RuntimeError, match="Gemini exploded"):
+            help_sess.respond("I don't understand")
+
+
+# ---------------------------------------------------------------------------
+# HelpSession — fallback handoff prompt (lines 345-378)
+# ---------------------------------------------------------------------------
+
+
+class TestHelpSessionFallbackHandoff:
+    def _make_help_session(self, mock_chat: MagicMock | None = None) -> HelpSession:
+        with patch("lesson_session.genai.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            if mock_chat is not None:
+                mock_client.chats.create.return_value = mock_chat
+            else:
+                mock_client.chats.create.return_value = MagicMock()
+            mock_client_cls.return_value = mock_client
+            return HelpSession(
+                lesson_content=_LESSON_CONTENT,
+                failed_question={
+                    "question": "What does chmod do?",
+                    "answer": "Changes file permissions",
+                },
+                student_wrong_answers=["Deletes files"],
+                lesson_teach_text="chmod modifies file access control bits.",
+            )
+
+    def test_fallback_generated_when_gemini_omits_handoff(self) -> None:
+        """When Gemini returns no gemini_handoff_prompt on turn 3 unresolved,
+        a fallback must be generated (lines 345-378)."""
+        mock_chat = MagicMock()
+        mock_chat.send_message.return_value = _make_gemini_response({
+            "resolved": False,
+            "character_emotion_state": "helping",
+            # No gemini_handoff_prompt key → triggers fallback
+        })
+        help_sess = self._make_help_session(mock_chat)
+        for _ in range(3):
+            result = help_sess.respond("Still confused.")
+        assert result["gemini_handoff_prompt"] is not None
+        assert "Linux" in result["gemini_handoff_prompt"]
+
+    def test_fallback_includes_question_text(self) -> None:
+        """Fallback prompt must reference the failed question text."""
+        mock_chat = MagicMock()
+        mock_chat.send_message.return_value = _make_gemini_response({
+            "resolved": False,
+            "character_emotion_state": "helping",
+        })
+        help_sess = self._make_help_session(mock_chat)
+        for _ in range(3):
+            result = help_sess.respond("Still confused.")
+        assert "What does chmod do?" in result["gemini_handoff_prompt"]
+
+    def test_fallback_not_generated_when_resolved(self) -> None:
+        """If resolved=True on turn 3, fallback must NOT be generated."""
+        mock_chat = MagicMock()
+        mock_chat.send_message.return_value = _make_gemini_response({
+            "resolved": True,
+            "character_emotion_state": "celebrating",
+        })
+        help_sess = self._make_help_session(mock_chat)
+        for _ in range(3):
+            result = help_sess.respond("Now I get it!")
+        assert result["gemini_handoff_prompt"] is None
+
+    def test_fallback_includes_teach_text_when_present(self) -> None:
+        """Teach summary must appear in fallback if lesson_teach_text was supplied."""
+        mock_chat = MagicMock()
+        mock_chat.send_message.return_value = _make_gemini_response({
+            "resolved": False,
+            "character_emotion_state": "helping",
+        })
+        help_sess = self._make_help_session(mock_chat)
+        for _ in range(3):
+            result = help_sess.respond("Still confused.")
+        assert "chmod" in result["gemini_handoff_prompt"]
+
+
+# ---------------------------------------------------------------------------
+# LessonSession — teach() and evaluate_answer() exception paths (lines 507-512, 608, 624-629)
+# ---------------------------------------------------------------------------
+
+
+class TestLessonSessionExceptionPaths:
+    def test_teach_re_raises_on_gemini_exception(self) -> None:
+        """Lines 507-512: exception from send_message in teach() must propagate."""
+        mock_chat = MagicMock()
+        mock_chat.send_message.side_effect = RuntimeError("API unavailable")
+        session = _make_session(mock_chat)
+        with pytest.raises(RuntimeError, match="API unavailable"):
+            session.teach()
+
+    def test_evaluate_answer_raises_index_error_when_no_active_question(self) -> None:
+        """Line 608: IndexError when question_index >= len(questions)."""
+        mock_chat = MagicMock()
+        session = _make_session(mock_chat)
+        # Exhaust all questions by advancing index past end
+        session._question_index = len(session._questions) + 1
+        with pytest.raises(IndexError, match="no active question"):
+            session.evaluate_answer("A")
+
+    def test_evaluate_answer_re_raises_on_gemini_exception(self) -> None:
+        """Lines 624-629: exception from send_message in evaluate_answer() must propagate."""
+        mock_chat = MagicMock()
+        # First call: teach succeeds, second call: evaluate_answer fails
+        teach_resp = _make_gemini_response({
+            "lesson_text": "Learn chmod",
+            "character_emotion_state": "teaching",
+            "key_concepts": ["chmod"],
+        })
+        mock_chat.send_message.side_effect = [
+            teach_resp,
+            RuntimeError("evaluate_answer API down"),
+        ]
+        session = _make_session(mock_chat)
+        session.teach()
+        with pytest.raises(RuntimeError, match="evaluate_answer API down"):
+            session.evaluate_answer("A")
+
+
+# ---------------------------------------------------------------------------
+# _validate_keys — missing keys path (line 712)
+# ---------------------------------------------------------------------------
+
+
+class TestValidateKeys:
+    def test_raises_value_error_on_missing_keys(self) -> None:
+        """_validate_keys must raise ValueError naming the missing keys."""
+        with pytest.raises(ValueError, match="missing required keys"):
+            ls._validate_keys(
+                {"resolved": True},
+                {"resolved", "character_emotion_state"},
+                context="test_context",
+            )
+
+    def test_no_raise_when_all_keys_present(self) -> None:
+        """_validate_keys must not raise when all required keys are present."""
+        ls._validate_keys(
+            {"resolved": True, "character_emotion_state": "happy"},
+            {"resolved", "character_emotion_state"},
+            context="test_context",
+        )
+
+    def test_error_message_includes_context(self) -> None:
+        """Error message must include the context label for debuggability."""
+        with pytest.raises(ValueError, match="test_context"):
+            ls._validate_keys({}, {"required_key"}, context="test_context")
+
+
+# ---------------------------------------------------------------------------
+# _require_text — None text path (line 712)
+# ---------------------------------------------------------------------------
+
+
+class TestRequireText:
+    def test_raises_value_error_when_response_text_is_none(self) -> None:
+        """_require_text must raise ValueError when response.text is None (safety block)."""
+        mock_response = MagicMock()
+        mock_response.text = None
+        with pytest.raises(ValueError, match="Gemini returned no text"):
+            ls._require_text(mock_response, "test_context")
+
+    def test_returns_text_when_present(self) -> None:
+        """_require_text must return the text string when it is non-None."""
+        mock_response = MagicMock()
+        mock_response.text = "some response text"
+        result = ls._require_text(mock_response, "test_context")
+        assert result == "some response text"
+
+    def test_error_includes_context_label(self) -> None:
+        """ValueError message must include the context label for traceability."""
+        mock_response = MagicMock()
+        mock_response.text = None
+        with pytest.raises(ValueError, match="my_context"):
+            ls._require_text(mock_response, "my_context")
+
+
+# ---------------------------------------------------------------------------
+# LessonSession.next_question() — exception path (lines 567-572)
+# ---------------------------------------------------------------------------
+
+
+class TestNextQuestionExceptionPath:
+    def test_next_question_re_raises_on_gemini_exception(self) -> None:
+        """Lines 567-572: exception in next_question() send_message must propagate."""
+        mock_chat = MagicMock()
+        # First advance to quiz phase by calling teach() successfully
+        mock_chat.send_message.side_effect = [
+            _make_gemini_response({
+                "lesson_text": "Learn chmod",
+                "character_emotion_state": "teaching",
+                "key_concepts": ["chmod"],
+            }),
+            RuntimeError("next_question API down"),
+        ]
+        session = _make_session(mock_chat)
+        session.teach()
+        with pytest.raises(RuntimeError, match="next_question API down"):
+            session.next_question()

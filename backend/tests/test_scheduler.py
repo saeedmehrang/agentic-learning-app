@@ -189,3 +189,89 @@ class TestEdgeCases:
         concepts = [_future("L07", mastery=0.99)]
         result = pick_next_lesson(concepts)
         assert result["lesson_id"] == "L07"
+
+    def test_non_string_non_datetime_review_at_skipped(self) -> None:
+        """Line 120: a next_review_at that is neither str nor datetime is skipped."""
+        concepts = [
+            {
+                "lesson_id": "L08",
+                "mastery_score": 0.5,
+                "next_review_at": 12345,  # int — invalid type, must skip
+            },
+            _overdue("L09", mastery=0.4),
+        ]
+        # L08 should be skipped (bad type); L09 should be selected as overdue
+        result = pick_next_lesson(concepts)
+        assert result["lesson_id"] == "L09"
+
+    def test_overdue_mastery_float_conversion_failure_falls_back_to_zero(self) -> None:
+        """Non-numeric mastery_score in overdue concept falls back to 0.0 → beginner."""
+        concepts = [
+            {
+                "lesson_id": "L10",
+                "mastery_score": "not-a-number",
+                "next_review_at": (_NOW - timedelta(hours=1)).isoformat(),
+            }
+        ]
+        result = pick_next_lesson(concepts)
+        assert result["lesson_id"] == "L10"
+        assert result["tier"] == "beginner"  # mastery=0.0 → beginner
+
+    def test_concept_without_lesson_id_is_skipped(self) -> None:
+        """Lines 109-110: concept missing lesson_id must be silently skipped."""
+        concepts = [
+            {"mastery_score": 0.5, "next_review_at": None},  # no lesson_id
+            _overdue("L11", mastery=0.4),
+        ]
+        result = pick_next_lesson(concepts)
+        assert result["lesson_id"] == "L11"
+
+    def test_naive_datetime_review_at_treated_as_utc(self) -> None:
+        """Line 123: naive (no tzinfo) datetime object for next_review_at is treated as UTC."""
+        naive_past = _NOW.replace(tzinfo=None) - timedelta(hours=1)
+        concepts = [
+            {
+                "lesson_id": "L12",
+                "mastery_score": 0.5,
+                "next_review_at": naive_past,  # datetime without tzinfo
+            }
+        ]
+        result = pick_next_lesson(concepts)
+        assert result["lesson_id"] == "L12"
+
+    def test_all_concepts_have_no_lesson_id_falls_back_to_l01(self) -> None:
+        """Lines 151-152: all concepts missing lesson_id → fallback to L01/beginner."""
+        concepts = [
+            {"mastery_score": 0.5},
+            {"mastery_score": 0.3},
+        ]
+        result = pick_next_lesson(concepts)
+        assert result["lesson_id"] == "L01"
+        assert result["tier"] == "beginner"
+
+    def test_future_mastery_float_failure_falls_back_to_zero(self) -> None:
+        """Lines 160-161: _safe_mastery returns 0.0 when mastery_score is non-numeric in Pass 2."""
+        concepts = [
+            _future("L13", mastery=0.8),  # has valid mastery → should NOT be selected
+            {
+                "lesson_id": "L14",
+                "mastery_score": "bad",
+                "next_review_at": (_NOW + timedelta(hours=24)).isoformat(),
+            },  # safe_mastery → 0.0 → selected as lowest
+        ]
+        result = pick_next_lesson(concepts)
+        assert result["lesson_id"] == "L14"
+
+
+# ---------------------------------------------------------------------------
+# _tier_for_mastery — advanced fallback (line 68)
+# ---------------------------------------------------------------------------
+
+
+class TestTierForMasteryFallback:
+    def test_mastery_above_all_thresholds_returns_advanced(self) -> None:
+        """Line 68: return 'advanced' when mastery >= 1.01 (above all thresholds)."""
+        from scheduler import _tier_for_mastery
+        assert _tier_for_mastery(1.01) == "advanced"
+        assert _tier_for_mastery(2.0) == "advanced"
+        assert _tier_for_mastery(999.0) == "advanced"

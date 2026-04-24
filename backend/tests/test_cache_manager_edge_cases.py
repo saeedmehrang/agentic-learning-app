@@ -226,3 +226,147 @@ class TestBlockBoundaries:
 
     def test_no_lesson_assigned_to_block_3_or_higher(self) -> None:
         assert all(v <= 2 for v in cache_manager._LESSON_BLOCK.values())
+
+
+# ---------------------------------------------------------------------------
+# _load_from_local — non-directory item at tier level (line 106)
+# ---------------------------------------------------------------------------
+
+
+class TestLoadFromLocalNonDir:
+    def test_non_directory_entry_at_tier_level_is_skipped(self, tmp_path: Path) -> None:
+        """A file (not a dir) at the tier level must be silently skipped."""
+        approved = tmp_path / "approved"
+        tier_dir = approved / "beginner"
+        tier_dir.mkdir(parents=True)
+        # Place a valid lesson file in the tier dir
+        lesson = {"lesson_id": "L01", "tier": "beginner", "lesson": {}, "quiz": {}}
+        (tier_dir / "L01.json").write_text(json.dumps(lesson))
+        # Place a plain file at the tier level — should be skipped, not crash
+        (approved / "README.txt").write_text("ignore me")
+
+        result = cache_manager._load_from_local(approved)
+        assert "L01:beginner" in result
+        assert len(result) == 1  # README.txt not counted
+
+
+# ---------------------------------------------------------------------------
+# _load_yaml_from_gcs / _load_json_from_gcs error paths (lines 187-232)
+# ---------------------------------------------------------------------------
+
+
+class TestGcsLoaderErrors:
+    def _make_gcs_client(self, download_return=None, download_raises=None) -> MagicMock:
+        mock_blob = MagicMock()
+        if download_raises:
+            mock_blob.download_as_text.side_effect = download_raises
+        else:
+            mock_blob.download_as_text.return_value = download_return
+        mock_client = MagicMock()
+        mock_client.bucket.return_value.blob.return_value = mock_blob
+        return mock_client
+
+    def test_load_yaml_from_gcs_raises_file_not_found_on_download_failure(self) -> None:
+        mock_client = self._make_gcs_client(download_raises=Exception("network error"))
+        with patch("google.cloud.storage.Client", return_value=mock_client):
+            with pytest.raises(FileNotFoundError, match="GCS object not found"):
+                cache_manager._load_yaml_from_gcs("my-bucket", "path/to/file.yaml")
+
+    def test_load_yaml_from_gcs_raises_value_error_on_bad_yaml(self) -> None:
+        mock_client = self._make_gcs_client(download_return="key: [unclosed")
+        with patch("google.cloud.storage.Client", return_value=mock_client):
+            with pytest.raises(ValueError, match="Invalid YAML"):
+                cache_manager._load_yaml_from_gcs("my-bucket", "path/to/file.yaml")
+
+    def test_load_json_from_gcs_raises_file_not_found_on_download_failure(self) -> None:
+        mock_client = self._make_gcs_client(download_raises=Exception("timeout"))
+        with patch("google.cloud.storage.Client", return_value=mock_client):
+            with pytest.raises(FileNotFoundError, match="GCS object not found"):
+                cache_manager._load_json_from_gcs("my-bucket", "path/to/file.json")
+
+    def test_load_json_from_gcs_raises_value_error_on_bad_json(self) -> None:
+        mock_client = self._make_gcs_client(download_return="{not valid json")
+        with patch("google.cloud.storage.Client", return_value=mock_client):
+            with pytest.raises(ValueError, match="Invalid JSON"):
+                cache_manager._load_json_from_gcs("my-bucket", "path/to/file.json")
+
+
+# ---------------------------------------------------------------------------
+# build_caches — GCS and local outlines/concept_map error paths
+# (lines 390-391, 398-399, 410-411, 415-416)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildCachesFileLoadErrors:
+    def _make_lesson_store(self) -> dict:
+        return {"L01:beginner": {"lesson_id": "L01", "tier": "beginner", "lesson": {}, "quiz": {}}}
+
+    def test_gcs_outlines_load_failure_logged_and_continues(self) -> None:
+        """build_caches should not raise when outlines.yaml GCS load fails."""
+        with (
+            patch("config.settings") as mock_settings,
+            patch("cache_manager._load_approved_content", return_value=self._make_lesson_store()),
+            patch("cache_manager._load_yaml_from_gcs", side_effect=FileNotFoundError("missing")),
+            patch("cache_manager._load_json_from_gcs", return_value={}),
+            patch("cache_manager.logger") as mock_logger,
+        ):
+            mock_settings.gcs_pipeline_bucket = "my-bucket"
+            os.environ.pop("ENABLE_LESSON_CACHE", None)
+            lesson_store, outlines, concept_map = cache_manager.build_caches()
+
+        assert outlines == {}
+        mock_logger.error.assert_called()
+
+    def test_gcs_concept_map_load_failure_logged_and_continues(self) -> None:
+        """build_caches should not raise when concept_map.json GCS load fails."""
+        with (
+            patch("config.settings") as mock_settings,
+            patch("cache_manager._load_approved_content", return_value=self._make_lesson_store()),
+            patch("cache_manager._load_yaml_from_gcs", return_value={"L01": {}}),
+            patch("cache_manager._load_json_from_gcs", side_effect=FileNotFoundError("missing")),
+            patch("cache_manager.logger") as mock_logger,
+        ):
+            mock_settings.gcs_pipeline_bucket = "my-bucket"
+            os.environ.pop("ENABLE_LESSON_CACHE", None)
+            lesson_store, outlines, concept_map = cache_manager.build_caches()
+
+        assert concept_map == {}
+        mock_logger.error.assert_called()
+
+    def test_local_outlines_load_failure_logged_and_continues(self) -> None:
+        """build_caches should not raise when outlines.yaml is missing locally."""
+        with (
+            patch("config.settings") as mock_settings,
+            patch("cache_manager._load_approved_content", return_value=self._make_lesson_store()),
+            patch("cache_manager.logger") as mock_logger,
+            patch("pathlib.Path.read_text", side_effect=FileNotFoundError("no file")),
+        ):
+            mock_settings.gcs_pipeline_bucket = ""
+            os.environ.pop("ENABLE_LESSON_CACHE", None)
+            lesson_store, outlines, concept_map = cache_manager.build_caches()
+
+        assert outlines == {}
+        mock_logger.warning.assert_called()
+
+    def test_local_concept_map_load_failure_logged_and_continues(self) -> None:
+        """build_caches should not raise when concept_map.json is missing locally."""
+        call_count: list[int] = [0]
+
+        def _read_text_side_effect(*args: object, **kwargs: object) -> str:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return "L01:\n  title: Intro to Linux\n"
+            raise FileNotFoundError("concept_map.json not found")
+
+        with (
+            patch("config.settings") as mock_settings,
+            patch("cache_manager._load_approved_content", return_value=self._make_lesson_store()),
+            patch("cache_manager.logger") as mock_logger,
+            patch("pathlib.Path.read_text", side_effect=_read_text_side_effect),
+        ):
+            mock_settings.gcs_pipeline_bucket = ""
+            os.environ.pop("ENABLE_LESSON_CACHE", None)
+            lesson_store, outlines, concept_map = cache_manager.build_caches()
+
+        assert concept_map == {}
+        mock_logger.warning.assert_called()

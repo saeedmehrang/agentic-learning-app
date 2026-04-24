@@ -469,3 +469,104 @@ def test_session_id_auto_generated_when_missing() -> None:
 
     assert isinstance(result["session_id"], str)
     assert len(result["session_id"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# _require_text — None text path (line 98)
+# ---------------------------------------------------------------------------
+
+
+def test_require_text_raises_when_response_text_is_none() -> None:
+    """_require_text must raise ValueError when response.text is None."""
+    from summary_call import _require_text
+    mock_response = MagicMock()
+    mock_response.text = None
+    with pytest.raises(ValueError, match="Gemini returned no text"):
+        _require_text(mock_response, "test_context")
+
+
+# ---------------------------------------------------------------------------
+# _extract_json — markdown fence stripping and error paths (lines 107-119)
+# ---------------------------------------------------------------------------
+
+
+def test_extract_json_strips_markdown_fence() -> None:
+    """_extract_json must strip ```json ... ``` fences before parsing."""
+    from summary_call import _extract_json
+    text = '```json\n{"summary_text": "Hello"}\n```'
+    result = _extract_json(text)
+    assert result == {"summary_text": "Hello"}
+
+
+def test_extract_json_strips_plain_fence() -> None:
+    from summary_call import _extract_json
+    text = '```\n{"summary_text": "Hello"}\n```'
+    result = _extract_json(text)
+    assert result == {"summary_text": "Hello"}
+
+
+def test_extract_json_raises_when_no_json_found() -> None:
+    """_extract_json must raise ValueError when no JSON object is found."""
+    from summary_call import _extract_json
+    with pytest.raises(ValueError, match="No JSON object found"):
+        _extract_json("This is not JSON at all.")
+
+
+def test_extract_json_raises_on_invalid_json() -> None:
+    """_extract_json must raise ValueError when the JSON is malformed."""
+    from summary_call import _extract_json
+    with pytest.raises(ValueError, match="Failed to parse JSON"):
+        _extract_json("{invalid json}")
+
+
+# ---------------------------------------------------------------------------
+# run_summary — Gemini call exception (lines 178-181)
+# ---------------------------------------------------------------------------
+
+
+def test_run_summary_re_raises_on_gemini_exception() -> None:
+    """Lines 178-181: exception from generate_content must propagate after logging."""
+    mock_client = MagicMock()
+    mock_client.models.generate_content.side_effect = RuntimeError("API down")
+    with (
+        patch("summary_call.genai.Client", return_value=mock_client),
+        _patch_firestore(),
+    ):
+        with pytest.raises(RuntimeError, match="API down"):
+            run_summary(_BASE_SESSION_DATA.copy())
+
+
+# ---------------------------------------------------------------------------
+# run_summary — run_fsrs() ValueError is swallowed (lines 212-213)
+# ---------------------------------------------------------------------------
+
+
+def test_run_summary_skips_concept_when_fsrs_raises_value_error() -> None:
+    """Lines 212-213: run_fsrs ValueError for a concept must be swallowed — other concepts proceed."""
+    from unittest.mock import call
+
+    call_count: list[int] = [0]
+
+    def _fsrs_side_effect(concept_id: str, *args: object, **kwargs: object) -> dict:
+        call_count[0] += 1
+        if concept_id == "chmod_command":
+            raise ValueError("bad FSRS input")
+        return {
+            "mastery_score": 0.6,
+            "fsrs_stability": 3.0,
+            "fsrs_difficulty": 5.0,
+            "next_review_at": "2099-01-01T00:00:00+00:00",
+            "last_review_at": "2026-01-01T00:00:00+00:00",
+        }
+
+    with (
+        _patch_genai(),
+        _patch_firestore(),
+        patch("summary_call.run_fsrs", side_effect=_fsrs_side_effect),
+    ):
+        result = run_summary(_BASE_SESSION_DATA.copy())
+
+    # file_permissions was processed; chmod_command was skipped — no crash
+    assert "summary_text" in result
+    # At least one concept was processed (file_permissions)
+    assert call_count[0] >= 1
