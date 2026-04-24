@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     # Override with MAX_SESSIONS_PER_HOUR env var at deploy time.
     max_sessions_per_hour: int = 10
 
+    # Handoff provider — AI chat surface offered to learners after 3 unresolved help turns.
+    # Options: "google_ai_studio" | "disabled"
+    # Override with HANDOFF_PROVIDER env var at deploy time.
+    handoff_provider: str = "google_ai_studio"
+
     # Model assignments (fixed per spec — do not change without updating spec)
     lesson_model: str = "gemini-3.1-flash-lite-preview"
     help_model: str = "gemini-3.1-flash-lite-preview"

@@ -36,6 +36,7 @@ from pydantic import BaseModel
 from config import settings
 from lesson_session import LessonSession
 from logging_config import configure_logging
+from handoff import get_handoff_provider
 from rate_limiter import RateLimitExceeded, check_rate_limit
 
 os.environ.setdefault("GOOGLE_CLOUD_PROJECT", settings.gcp_project_id)
@@ -184,6 +185,7 @@ class HelpResponse(BaseModel):
     resolved: bool
     character_emotion_state: str | None = None
     gemini_handoff_prompt: str | None = None
+    handoff_url: str | None = None
     turns_remaining: int = 0
 
 
@@ -500,10 +502,16 @@ async def help_turn(session_id: str, request: HelpRequest) -> HelpResponse:
             if data.help_turn_count >= 3 or result.get("resolved"):
                 data.phase = "quiz"
 
+            handoff_prompt = result.get("gemini_handoff_prompt")
+            handoff_url: str | None = None
+            if handoff_prompt:
+                handoff_url = get_handoff_provider().build_url(handoff_prompt, data.lesson_id)
+
             return HelpResponse(
                 resolved=result.get("resolved", False),
                 character_emotion_state=result.get("character_emotion_state"),
-                gemini_handoff_prompt=result.get("gemini_handoff_prompt"),
+                gemini_handoff_prompt=handoff_prompt,
+                handoff_url=handoff_url,
                 turns_remaining=turns_remaining,
             )
         except HTTPException:

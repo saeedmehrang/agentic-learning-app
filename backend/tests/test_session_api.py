@@ -414,6 +414,82 @@ class TestFullSessionLifecycle:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Handoff URL in help response
+# ---------------------------------------------------------------------------
+
+
+class TestHandoffUrl:
+    def test_handoff_url_present_when_prompt_returned(self, client: TestClient) -> None:
+        """handoff_url is populated when gemini_handoff_prompt is non-null."""
+        from unittest.mock import MagicMock, patch
+
+        sid = _start_session(client)
+        _advance_to_quiz(client, sid)
+        _set_phase(sid, "help")
+
+        # Override the help_session mock to return a handoff prompt on this turn
+        mock_help = MagicMock()
+        mock_help.respond.return_value = {
+            "resolved": False,
+            "character_emotion_state": "helping",
+            "gemini_handoff_prompt": "I am stuck on Linux file permissions. Please help.",
+        }
+        _sessions[sid].lesson_session.help_session = mock_help
+
+        with patch("main.get_handoff_provider") as mock_get_provider:
+            mock_provider = MagicMock()
+            mock_provider.build_url.return_value = "https://aistudio.google.com/prompts/new_chat?prompt=test"
+            mock_get_provider.return_value = mock_provider
+            resp = client.post(f"/session/{sid}/help", json={"message": "help"})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["handoff_url"] == "https://aistudio.google.com/prompts/new_chat?prompt=test"
+        mock_provider.build_url.assert_called_once()
+
+    def test_handoff_url_none_when_no_prompt(self, client: TestClient) -> None:
+        """handoff_url is None when gemini_handoff_prompt is null (e.g. resolved)."""
+        sid = _start_session(client)
+        _advance_to_quiz(client, sid)
+        _set_phase(sid, "help")
+
+        # Default mock returns gemini_handoff_prompt=None
+        resp = client.post(f"/session/{sid}/help", json={"message": "got it"})
+
+        assert resp.status_code == 200
+        assert resp.json()["handoff_url"] is None
+
+    def test_handoff_url_none_when_provider_disabled(self, client: TestClient) -> None:
+        """When provider is disabled, handoff_url is None even if prompt exists."""
+        from unittest.mock import MagicMock, patch
+
+        from handoff import DisabledProvider
+
+        sid = _start_session(client)
+        _advance_to_quiz(client, sid)
+        _set_phase(sid, "help")
+
+        mock_help = MagicMock()
+        mock_help.respond.return_value = {
+            "resolved": False,
+            "character_emotion_state": "helping",
+            "gemini_handoff_prompt": "some prompt text",
+        }
+        _sessions[sid].lesson_session.help_session = mock_help
+
+        with patch("main.get_handoff_provider", return_value=DisabledProvider()):
+            resp = client.post(f"/session/{sid}/help", json={"message": "help"})
+
+        assert resp.status_code == 200
+        assert resp.json()["handoff_url"] is None
+
+
+# ---------------------------------------------------------------------------
+# Rate limit HTTP response
+# ---------------------------------------------------------------------------
+
+
 class TestRateLimit:
     def test_rate_limited_session_start_returns_429(self, client: TestClient) -> None:
         """When check_rate_limit raises RateLimitExceeded the endpoint returns
