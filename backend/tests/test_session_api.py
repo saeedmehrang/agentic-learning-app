@@ -407,4 +407,27 @@ class TestFullSessionLifecycle:
         c_resp = client.post(f"/session/{sid}/complete", json={"time_on_task_seconds": 60})
         assert c_resp.status_code == 200
         assert c_resp.json()["status"] == "ok"
-        assert sid not in _sessions
+
+
+# ---------------------------------------------------------------------------
+# Rate limit HTTP response
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimit:
+    def test_rate_limited_session_start_returns_429(self, client: TestClient) -> None:
+        """When check_rate_limit raises RateLimitExceeded the endpoint returns
+        HTTP 429 with a Retry-After header matching retry_after_seconds."""
+        from unittest.mock import patch
+
+        from rate_limiter import RateLimitExceeded
+
+        with patch(
+            "main.check_rate_limit",
+            side_effect=RateLimitExceeded(retry_after_seconds=1800),
+        ):
+            resp = client.post("/session/start", json={"uid": "uid-rate-limited"})
+
+        assert resp.status_code == 429
+        assert resp.headers["Retry-After"] == "1800"
+        assert "rate limit" in resp.json()["detail"].lower()

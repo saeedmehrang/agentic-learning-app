@@ -12,13 +12,25 @@ Firestore schema:
 """
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 
 from google.cloud import firestore
 
 from config import settings
 
+logger = logging.getLogger(__name__)
+
 _WINDOW = timedelta(hours=1)
+
+_db: firestore.Client | None = None
+
+
+def _get_db() -> firestore.Client:
+    global _db
+    if _db is None:
+        _db = firestore.Client(project=settings.gcp_project_id)
+    return _db
 
 
 class RateLimitExceeded(Exception):
@@ -57,9 +69,19 @@ def check_rate_limit(uid: str) -> None:
     """
     Enforce per-UID rate limit. Raises RateLimitExceeded if the UID has
     exceeded MAX_SESSIONS_PER_HOUR starts within the last 60 minutes.
+
+    Fails open on Firestore errors — the limiter is a cost-control tool,
+    not a security gate, so unavailability must not block session starts.
     """
     max_per_hour: int = settings.max_sessions_per_hour
-    db = firestore.Client(project=settings.gcp_project_id)
-    ref = db.collection("rate_limits").document(uid)
-    transaction = db.transaction()
-    firestore.transactional(_update_in_transaction)(transaction, ref, max_per_hour)
+    try:
+        db = _get_db()
+        ref = db.collection("rate_limits").document(uid)
+        transaction = db.transaction()
+        firestore.transactional(_update_in_transaction)(transaction, ref, max_per_hour)
+    except RateLimitExceeded:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "Rate limiter Firestore error for uid=%s — failing open: %s", uid, exc
+        )
