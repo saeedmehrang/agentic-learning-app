@@ -537,7 +537,7 @@ flutter test             # all widget tests pass
 
 ### 6.5 **Security: Firebase ID Token Verification (before public launch)**
 > **The backend is `--allow-unauthenticated` at the Cloud Run IAM layer. Public access was paused 2026-04-23 by removing the `allUsers` invoker binding. Re-enable only after token verification middleware is in place.**
-- [x] **Add per-UID rate limiting** — max 10 session starts per hour per UID, enforced via Firestore transaction in `backend/rate_limiter.py` ✅ 2026-04-23
+- [x] **Add per-UID rate limiting** — max 10 session starts per hour per UID, enforced via Firestore transaction in `backend/rate_limiter.py` ✅ 2026-04-23; hardened 2026-04-24: singleton Firestore client, fail-open on errors, async-safe (`asyncio.to_thread`), 100% test coverage (11 tests)
 - [ ] **Add Firebase Admin SDK token verification middleware to FastAPI** — reject requests missing a valid `Authorization: Bearer <firebase-id-token>` header with 401
 - [ ] **Flutter: attach Firebase ID token to every backend request** — call `user.getIdToken()` and inject as `Authorization` header in the HTTP client
 - [ ] Re-run integration tests with token auth enabled — update test fixtures to mint a Firebase test token
